@@ -61,7 +61,9 @@ export default function Login() {
 
       const data = await res.json();
       login(data.token, data.user);
-      navigate("/", { replace: true });
+      // The Qidian rehearsal MVP is local-first and does not require
+      // LLM/Embedding setup, so make it the first destination after login.
+      navigate("/rehearsal", { replace: true });
     } catch (err) {
       setError(err.message);
     } finally {

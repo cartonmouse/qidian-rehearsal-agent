@@ -6,8 +6,7 @@
 
 * Python `3.11+`
 * Node.js `18+`
-* 一个可用的 **OpenAI 兼容 LLM 接口**
-* 一个可用的 **Embedding 接口**，或者本地 Embedding 模型
+* LLM 和 Embedding **不是奇点排练规则分支的启动前置条件**；只有启用 LLM 适应性能力、语义检索、LLM 组织式剧本问答或原项目面试能力时才需要配置
 
 录音上传转写不是必需功能；如果你要用它，再额外配置语音相关环境变量。
 
@@ -19,7 +18,9 @@ cp .env.example .env
 
 ### 2. 最小可运行配置
 
-如果你想先把项目跑起来，推荐先用 **API Embedding** 模式。如果你使用远程 Embedding API，最小可运行配置如下：
+如果目标是先运行奇点排练的规则分支，只需要完成 `.env`、依赖和默认账号配置即可，不必填写 LLM 或 Embedding API。剧本解析、人工确认、规则检索式剧本问答、调度、排班、原词对词、舞台可视化、资源检查、音乐时间轴、预算、发票、场记、复盘、度量、建议收件箱和知识资产的规则路径都可以直接使用。
+
+如果要启用适应性对词、LLM 复盘、LLM 宣传文案、语义检索式剧本问答、LLM 组织式剧本问答，或原项目的 RAG/面试能力，再配置一套 **OpenAI 兼容 LLM 接口** 和/或 Embedding。使用远程 Embedding API 时，配置如下：
 
 ```env
 API_BASE=https://your-llm-api-base/v1
@@ -33,7 +34,7 @@ EMBEDDING_API_MODEL=your-embedding-model
 
 这些变量分别是：
 
-* `API_BASE`：主 LLM 的 OpenAI 兼容接口地址。面试、复盘、JD 分析都会走它。
+* `API_BASE`：主 LLM 的 OpenAI 兼容接口地址。面试、复盘、宣传文案、适应性对词和剧本问答的 LLM 组织分支都会走它。
 * `API_KEY`：上面这个 LLM 接口的密钥。
 * `MODEL`：主 LLM 模型名。
 * `EMBEDDING_BACKEND`：Embedding 走哪条路，只能是 `api` 或 `local`。
@@ -198,3 +199,13 @@ ALIYUN_OSS_ENDPOINT=oss-cn-shanghai.aliyuncs.com
 * Docker 模式下，前端默认对外暴露 `80` 端口。
 * 如果你在线上要使用麦克风或录音相关能力，建议启用 HTTPS；浏览器对非 `localhost` 的音频权限更严格。
 * 线上环境不要保留默认的 `JWT_SECRET`、`DEFAULT_PASSWORD`。
+
+### 9. GitHub CI
+
+仓库中的 `.github/workflows/ci.yml` 会在 `main`/`master` 推送和 Pull Request 上执行：
+
+* 后端依赖安装、`compileall` 和排练 Agent 回归；
+* 前端 `typecheck`、单元测试、lint 和生产构建；
+* 使用 `.env.example` 的 Docker Compose 静态配置检查。
+
+CI 不需要任何 LLM、Embedding 或语音服务密钥；排练规则分支和测试数据均在本地确定性运行。

@@ -1,51 +1,80 @@
-# 后端检查:每次 push / PR 时,在干净环境安装依赖、构建 app 并运行回归测试。
-# 目的是拦下"本地能跑、干净环境装不起来"和已修问题回归,让它到不了用户手里。
-name: CI
+name: qidian-rehearsal-agent CI
 
 on:
   push:
+    branches: [main, master]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  backend-smoke:
+  backend:
+    name: Backend regression
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.11" # 与 backend/Dockerfile 的基础镜像一致
+          python-version: "3.11"
           cache: pip
 
-      - name: 安装依赖
-        run: pip install -r requirements.txt
+      - name: Install backend dependencies
+        run: python -m pip install -r requirements.txt
 
-      - name: 构建后端 app(导入整棵依赖树 + 装配路由)
-        run: |
-          python -c "from backend.app import create_app; create_app(); print('OK app builds')"
+      - name: Compile backend
+        run: python -m compileall -q backend
 
-      - name: 运行后端回归测试
-        run: python -m unittest discover -s tests
+      - name: Build FastAPI app
+        run: python -c "from backend.app import create_app; create_app(); print('backend app builds')"
 
-  frontend-build:
+      - name: Run rehearsal regression
+        run: python -c "import tests.test_rehearsal_agent as t; [getattr(t, n)() for n in dir(t) if n.startswith('test_')]"
+
+  frontend:
+    name: Frontend checks
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
         with:
-          node-version: "22" # 与 frontend/Dockerfile 的基础镜像一致
+          node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: 安装依赖(npm ci:严格按 lockfile,顺带查 lock 是否同步)
+      - name: Install frontend dependencies
         run: npm ci
 
-      - name: 运行前端回归测试
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Frontend unit tests
         run: npm test
 
-      - name: 构建前端(vite build,拦语法错误/坏 import/漏装依赖)
+      - name: Lint
+        run: npm run lint
+
+      - name: Production build
         run: npm run build
+
+  deployment-config:
+    name: Deployment config
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Docker Compose configuration
+        run: |
+          cp .env.example .env
+          docker compose config

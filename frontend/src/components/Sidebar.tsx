@@ -1,9 +1,8 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
-  User, BookOpen, GitFork, Clock, Mic, Brain, Theater,
-  Target, FileText, FileUser, Settings as SettingsIcon,
-  Sun, Moon, LogOut, Menu, X, ChevronLeft, ChevronRight, Sparkles,
+  Archive, BarChart3, BookMarked, CalendarClock, ClipboardPenLine, FileText, GitBranch, Inbox, Map, MessageCircle, NotebookPen, Search, Theater, Settings as SettingsIcon,
+  Sun, Moon, LogOut, Menu, X, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import useAuth from "../hooks/useAuth";
@@ -25,17 +24,19 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { path: "/rehearsal", label: "排练中枢", icon: Theater },
-  { path: "/profile", label: "我的画像", icon: User },
-  { path: "/personal-agent", label: "成长 Agent", icon: Sparkles },
-  { path: "/topic-drill", label: "专项训练", icon: Target },
-  { path: "/mock-interview", label: "面试训练", icon: FileText },
-  { path: "/resume-manager", label: "简历管理", icon: FileUser },
-  { path: "/recording", label: "录音复盘", icon: Mic },
-  { path: "/copilot", label: "面试 Copilot", icon: Brain },
-  { path: "/knowledge", label: "训练领域", icon: BookOpen },
-  { path: "/graph", label: "图谱", icon: GitFork },
-  { path: "/history", label: "历史记录", icon: Clock },
+  { path: "/rehearsal", label: "排练工作台", icon: Theater },
+  { path: "/rehearsal/rag", label: "剧本问答", icon: Search },
+  { path: "/rehearsal/schedule", label: "演员排练表", icon: CalendarClock },
+  { path: "/rehearsal/line-reading", label: "对词训练", icon: MessageCircle },
+  { path: "/rehearsal/feedback", label: "排练复盘", icon: NotebookPen },
+  { path: "/rehearsal/metrics", label: "排练度量", icon: BarChart3 },
+  { path: "/rehearsal/logbook", label: "场记档案", icon: ClipboardPenLine },
+  { path: "/rehearsal/suggestions", label: "建议收件箱", icon: Inbox },
+  { path: "/rehearsal/knowledge", label: "知识资产", icon: BookMarked },
+  { path: "/rehearsal/versions", label: "版本追踪", icon: GitBranch },
+  { path: "/rehearsal/stage", label: "舞台可视化", icon: Map },
+  { path: "/rehearsal/resources", label: "资源管理", icon: Archive },
+  { path: "/rehearsal/resource-finance", label: "音乐与预算", icon: FileText },
   { path: "/settings", label: "设置", icon: SettingsIcon },
 ];
 
@@ -56,8 +57,9 @@ export default function Sidebar() {
   useEffect(() => { localStorage.setItem("sidebar-collapsed", String(collapsed)); }, [collapsed]);
 
   const toggleTheme = () => setTheme(t => t === "dark" ? "light" : "dark");
-  const isActive = (path: string) =>
-    path === "/" ? location.pathname === "/" : location.pathname.startsWith(path);
+  const isActive = (path: string) => path === "/rehearsal"
+    ? location.pathname === "/rehearsal"
+    : location.pathname.startsWith(path);
 
   const handleLogout = () => {
     logout();

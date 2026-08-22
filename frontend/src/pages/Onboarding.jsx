@@ -271,6 +271,15 @@ export default function Onboarding() {
         <div className="text-center text-[12px] text-dim/70 mt-4">
           语音输入、联网搜索、录音复盘等可选功能的 key 可稍后在「设置 → 可选服务」里补。
         </div>
+        <div className="text-center mt-3">
+          <button
+            type="button"
+            onClick={() => navigate("/rehearsal", { replace: true })}
+            className="text-sm text-primary hover:underline cursor-pointer"
+          >
+            跳过配置，先进入奇点排练工作台
+          </button>
+        </div>
       </div>
     </div>
   );

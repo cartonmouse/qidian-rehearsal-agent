@@ -1,18 +1,25 @@
 """剧本解读 Agent 的最小可运行编排。
 
 编排显式暴露每一步的输入输出：摄取、分场、并行实体抽取、校验、修复、汇总。
-当前实体抽取节点是可解释的本地工具，下一步可以在同一个状态契约中增加 LLM
-结构化抽取和人工确认节点。
+实体抽取节点支持可解释的本地规则、可选 LLM 结构化抽取，以及失败后的自动降级。
 """
 
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+import logging
+from typing import Literal
 from uuid import uuid4
 
+from backend.llm_provider import resolve_llm_config
 from backend.rehearsal.models import AgentStep, Character, Prop, ScriptAnalysis
-from backend.rehearsal.parser import extract_props, extract_scene, normalize_lines, split_scene_blocks
+from backend.rehearsal.llm_extractor import extract_scene_with_llm
+from backend.rehearsal.parser import extract_scene, normalize_lines, split_scene_blocks
+
+
+logger = logging.getLogger("uvicorn")
+AnalysisMode = Literal["auto", "rules", "llm"]
 
 
 class ScriptAnalysisAgent:
@@ -25,6 +32,8 @@ class ScriptAnalysisAgent:
         version_label: str,
         script_text: str,
         script_id: str | None = None,
+        user_id: str | None = None,
+        analysis_mode: AnalysisMode = "auto",
     ) -> ScriptAnalysis:
         trace: list[AgentStep] = []
 
@@ -44,16 +53,48 @@ class ScriptAnalysisAgent:
             output_count=len(blocks),
         ))
 
-        # 每个场次彼此独立，使用线程池模拟并行任务节点；未来可替换为异步 LLM 调用。
+        llm_config = resolve_llm_config(user_id) if user_id else {}
+        llm_ready = bool(llm_config.get("api_key") and llm_config.get("model"))
+        use_llm = analysis_mode == "llm" or (analysis_mode == "auto" and llm_ready)
+
+        def extract_one(block):
+            if not use_llm:
+                scene, warnings = extract_scene(block)
+                return scene, warnings, "deterministic"
+            try:
+                scene, warnings = extract_scene_with_llm(block, user_id or "")
+                return scene, warnings, "llm"
+            except Exception as exc:  # noqa: BLE001 - fallback is part of the Agent contract
+                logger.warning(
+                    "LLM scene extraction failed for scene %s (%s); using deterministic fallback.",
+                    block.number,
+                    exc.__class__.__name__,
+                )
+                scene, warnings = extract_scene(block)
+                warnings.insert(0, f"{block.title} 的 LLM 抽取不可用，已回退规则解析。")
+                return scene, warnings, "deterministic"
+
+        # 每个场次彼此独立，使用线程池并行执行规则或 LLM 抽取节点。
         worker_count = min(4, max(1, len(blocks)))
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
-            extracted = list(executor.map(extract_scene, blocks))
-        scenes = [scene for scene, _ in extracted]
-        extraction_warnings = [warning for _, warnings in extracted for warning in warnings]
+            extracted = list(executor.map(extract_one, blocks))
+        scenes = [scene for scene, _, _ in extracted]
+        extraction_warnings = [warning for _, warnings, _ in extracted for warning in warnings]
+        extraction_modes = [mode for _, _, mode in extracted]
+        output_mode = (
+            "deterministic"
+            if not extraction_modes or all(mode == "deterministic" for mode in extraction_modes)
+            else "llm"
+            if all(mode == "llm" for mode in extraction_modes)
+            else "hybrid"
+        )
         trace.append(AgentStep(
             name="extract_entities_parallel",
             status="completed",
-            summary=f"并行提取 {len(scenes)} 个场次的角色、台词和道具。",
+            summary=(
+                f"并行提取 {len(scenes)} 个场次的角色、台词和道具。"
+                f"（{output_mode}）"
+            ),
             output_count=sum(len(scene.lines) for scene in scenes),
         ))
 
@@ -96,6 +137,8 @@ class ScriptAnalysisAgent:
             script_id=script_id or uuid4().hex,
             title=title,
             version_label=version_label,
+            analysis_mode=output_mode,
+            parser_version="0.2.0",
             scenes=scenes,
             characters=list(characters_by_name.values()),
             props=list(props_by_name.values()),

@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from backend.rehearsal.models import DialogueLine, Scene, SourceSpan
+from backend.rehearsal.models import DialogueLine, Scene, SourceSpan, StageDirection
 
 
 _SCENE_RE = re.compile(
@@ -23,6 +23,10 @@ _SCENE_LABEL_RE = re.compile(
 )
 _LOCATION_RE = re.compile(r"^\s*(?:内景|外景|INT\.?|EXT\.?)\s*(.*)$", re.IGNORECASE)
 _SPEAKER_RE = re.compile(r"^\s*([^\s:：()（）\[\]【】]{1,24})\s*[：:]\s*(.+?)\s*$")
+_STAGE_CHARACTER_RE = re.compile(
+    r"(?:^|[（(，,；;\s])([^\s，,。；;（）()]+?)"
+    r"(?=(?:从|向|走|上场|下场|入场|进场|离场|退场|拿起|放下|站|坐|起身|进入|退出))"
+)
 
 _META_SPEAKERS = {
     "人物",
@@ -52,6 +56,12 @@ _PROP_LEXICON = (
     "书",
     "电脑",
 )
+_STAGE_CHARACTER_STOPWORDS = {
+    "所有人",
+    "大家",
+    "舞台",
+    "照",
+}
 
 
 @dataclass(frozen=True)
@@ -137,6 +147,29 @@ def is_stage_direction(text: str) -> bool:
     )
 
 
+def classify_stage_direction(text: str, *, has_prop: bool = False) -> str:
+    """Classify a stage cue without changing its original wording."""
+    if re.search(r"上场|入场|进场|走进|进入|出现", text):
+        return "entrance"
+    if re.search(r"下场|离场|退场|走出|退出|离开", text):
+        return "exit"
+    if has_prop or re.search(r"拿起|放下|放置|取出|打开|关上|携带", text):
+        return "prop"
+    if re.search(r"走到|站在|坐下|起身|面向|走位|移动|站起", text):
+        return "movement"
+    return "other"
+
+
+def extract_stage_characters(text: str) -> list[str]:
+    """Extract conservative role-name candidates from a stage cue."""
+    candidates: list[str] = []
+    for match in _STAGE_CHARACTER_RE.finditer(text):
+        candidate = match.group(1).strip("（()[]【】 ")
+        if candidate and candidate not in _STAGE_CHARACTER_STOPWORDS and candidate not in candidates:
+            candidates.append(candidate)
+    return candidates
+
+
 def extract_props(text: str) -> list[str]:
     return [prop for prop in _PROP_LEXICON if prop in text]
 
@@ -146,6 +179,7 @@ def extract_scene(block: SceneBlock) -> tuple[Scene, list[str]]:
     characters: list[str] = []
     props: list[str] = []
     lines: list[DialogueLine] = []
+    stage_directions: list[StageDirection] = []
     warnings: list[str] = []
 
     for line_number, raw_text in block.lines:
@@ -159,6 +193,14 @@ def extract_scene(block: SceneBlock) -> tuple[Scene, list[str]]:
                 props.append(prop)
 
         if is_stage_direction(text):
+            for character in extract_stage_characters(text):
+                if character not in characters:
+                    characters.append(character)
+            stage_directions.append(StageDirection(
+                text=text,
+                kind=classify_stage_direction(text, has_prop=bool(found_props)),
+                source_line=line_number,
+            ))
             continue
 
         match = _SPEAKER_RE.match(text)
@@ -189,6 +231,7 @@ def extract_scene(block: SceneBlock) -> tuple[Scene, list[str]]:
         characters=characters,
         props=props,
         lines=lines,
+        stage_directions=stage_directions,
         source=SourceSpan(
             start_line=block.start_line,
             end_line=block.end_line,

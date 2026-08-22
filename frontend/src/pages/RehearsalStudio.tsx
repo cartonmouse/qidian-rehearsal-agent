@@ -1,16 +1,41 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
+  CalendarClock,
   CheckCircle2,
+  Clock3,
+  Download,
   FileUp,
+  Layers3,
   Loader2,
   Orbit,
   Package,
+  Pencil,
   Play,
+  Save,
+  X,
   Users,
 } from "lucide-react";
 
-import { parseScript, parseScriptFile, type ScriptAnalysis } from "@/api/rehearsal";
+import {
+  parseScript,
+  parseScriptFile,
+  planSchedule as planScheduleApi,
+  getAvailability,
+  reviewScript,
+  saveAvailability,
+  generateScheduleDraft,
+  type AvailabilitySlot,
+  type SceneReviewPatch,
+  type ScriptAnalysis,
+  type ScheduleDraft,
+} from "@/api/rehearsal";
+import {
+  formatAvailabilityCsv,
+  formatAvailabilityText,
+  parseAvailabilityImport,
+  parseAvailabilityText,
+} from "@/lib/rehearsal";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -51,14 +76,59 @@ const TRACE_LABELS: Record<string, string> = {
   repair: "修复",
 };
 
+const ANALYSIS_MODE_LABELS: Record<ScriptAnalysis["analysis_mode"], string> = {
+  deterministic: "规则解析",
+  llm: "LLM 结构化解析",
+  hybrid: "LLM + 规则降级",
+};
+
+const REVIEW_STATUS_LABELS: Record<ScriptAnalysis["review_status"], string> = {
+  pending: "待人工确认",
+  confirmed: "已确认",
+  edited: "已人工修改",
+};
+
+function splitLabels(value: string): string[] {
+  return value
+    .split(/[,，、\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .filter((item, index, items) => items.indexOf(item) === index);
+}
+
 export default function RehearsalStudio() {
   const [title, setTitle] = useState("轨道之外");
   const [versionLabel, setVersionLabel] = useState("v1");
   const [scriptText, setScriptText] = useState(DEMO_SCRIPT);
   const [analysis, setAnalysis] = useState<ScriptAnalysis | null>(null);
+  const [schedule, setSchedule] = useState<ScheduleDraft | null>(null);
   const [busy, setBusy] = useState(false);
+  const [scheduling, setScheduling] = useState(false);
+  const [planning, setPlanning] = useState(false);
+  const [availabilitySaving, setAvailabilitySaving] = useState(false);
+  const [availabilityText, setAvailabilityText] = useState("");
   const [error, setError] = useState("");
+  const [reviewing, setReviewing] = useState(false);
+  const [reviewDrafts, setReviewDrafts] = useState<Record<string, SceneReviewPatch>>({});
+  const [reviewNote, setReviewNote] = useState("");
+  const [reviewMessage, setReviewMessage] = useState("");
+  const [availabilityMessage, setAvailabilityMessage] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  const availabilityFileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getAvailability()
+      .then((slots) => {
+        if (!cancelled) setAvailabilityText(formatAvailabilityText(slots));
+      })
+      .catch(() => {
+        // The time pool is an optional enhancement; local input remains usable if it cannot be loaded.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function analyze() {
     const value = scriptText.trim();
@@ -68,12 +138,17 @@ export default function RehearsalStudio() {
     }
     setBusy(true);
     setError("");
+    setReviewMessage("");
+    setSchedule(null);
     try {
-      setAnalysis(await parseScript({
+      const result = await parseScript({
         title: title.trim() || "未命名剧本",
         version_label: versionLabel.trim() || "v1",
         script_text: value,
-      }));
+      });
+      setAnalysis(result);
+      setSchedule(null);
+      setReviewing(false);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "剧本解析失败");
     } finally {
@@ -85,11 +160,13 @@ export default function RehearsalStudio() {
     if (!file) return;
     setBusy(true);
     setError("");
+    setReviewMessage("");
     try {
       const result = await parseScriptFile(file, versionLabel.trim() || "v1");
       setTitle(result.title);
       setScriptText(`已上传 ${file.name}，解析结果已保存。`);
       setAnalysis(result);
+      setReviewing(false);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "文件解析失败");
     } finally {
@@ -98,13 +175,149 @@ export default function RehearsalStudio() {
     }
   }
 
+  function startReview() {
+    if (!analysis) return;
+    const drafts = Object.fromEntries(
+      analysis.scenes.map((scene) => [scene.scene_id, {
+        scene_id: scene.scene_id,
+        title: scene.title,
+        characters: [...scene.characters],
+        props: [...scene.props],
+      }]),
+    );
+    setReviewDrafts(drafts);
+    setReviewNote(analysis.review_note || "");
+    setReviewMessage("");
+    setReviewing(true);
+  }
+
+  function cancelReview() {
+    setReviewing(false);
+    setReviewDrafts({});
+    setReviewMessage("");
+  }
+
+  function updateReviewDraft(sceneId: string, patch: Partial<SceneReviewPatch>) {
+    setReviewDrafts((current) => ({
+      ...current,
+      [sceneId]: { ...current[sceneId], ...patch },
+    }));
+  }
+
+  async function submitReview(status: "confirmed" | "edited") {
+    if (!analysis) return;
+    setBusy(true);
+    setError("");
+    try {
+      const updated = await reviewScript(analysis.script_id, {
+        scenes: analysis.scenes.map((scene) => reviewDrafts[scene.scene_id]),
+        review_status: status,
+        review_note: reviewNote.trim(),
+      });
+      setAnalysis(updated);
+      setSchedule(null);
+      setReviewing(false);
+      setReviewDrafts({});
+      setReviewMessage(status === "edited" ? "人工修改已保存，剧本结构可以进入排练调度。" : "已确认解析结果，可以进入排练调度。");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "审核结果保存失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function generateSchedule(preview = false) {
+    if (!analysis) return;
+    setScheduling(true);
+    setError("");
+    try {
+      setSchedule(await generateScheduleDraft(analysis.script_id, 45, preview));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "排练调度草案生成失败");
+    } finally {
+      setScheduling(false);
+    }
+  }
+
+  async function planWithAvailability() {
+    if (!analysis) return;
+    let slots: AvailabilitySlot[];
+    try {
+      slots = parseAvailabilityText(availabilityText);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "可用时间格式错误");
+      return;
+    }
+    setPlanning(true);
+    setError("");
+    try {
+      setSchedule(await planScheduleApi(analysis.script_id, slots));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "自动排班失败");
+    } finally {
+      setPlanning(false);
+    }
+  }
+
+  async function persistAvailability() {
+    let slots: AvailabilitySlot[];
+    try {
+      slots = parseAvailabilityText(availabilityText);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "演员档期格式错误");
+      return;
+    }
+    setAvailabilitySaving(true);
+    setError("");
+    try {
+      const saved = await saveAvailability(slots);
+      setAvailabilityText(formatAvailabilityText(saved));
+      setAvailabilityMessage(`已保存 ${saved.length} 条演员可用时间，可供不同剧本重复使用。`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "演员档期保存失败");
+    } finally {
+      setAvailabilitySaving(false);
+    }
+  }
+
+  async function importAvailability(file?: File) {
+    if (!file) return;
+    setError("");
+    setAvailabilityMessage("");
+    try {
+      const imported = parseAvailabilityImport(await file.text());
+      setAvailabilityText(formatAvailabilityText(imported));
+      setAvailabilityMessage(`已导入 ${imported.length} 条档期记录，请确认后保存。`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "档期文件解析失败");
+    } finally {
+      if (availabilityFileRef.current) availabilityFileRef.current.value = "";
+    }
+  }
+
+  function downloadAvailabilityTemplate() {
+    const blob = new Blob([`\uFEFF${formatAvailabilityCsv([])}`], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "qidian-actor-availability-template.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  const hasAnalysis = Boolean(analysis);
+  const isReviewed = Boolean(analysis && analysis.review_status !== "pending");
+  const hasSchedule = Boolean(schedule);
+  const isSchedulePreview = Boolean(schedule?.is_preview);
+  const hasScheduledTasks = Boolean(schedule?.tasks.some((task) => task.status === "scheduled"));
+
   return (
     <div className={cn(PAGE_CLASS, "space-y-4")}>
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <div className="flex items-center gap-2 text-3xl font-display font-bold tracking-tight md:text-[38px]">
             <Orbit className="text-primary" size={30} />
-            排练中枢
+            排练工作台
           </div>
           <div className="mt-1 text-sm leading-6 text-dim">
             剧本解读 Agent：把文本变成可核对、可调度的排练结构。
@@ -115,10 +328,120 @@ export default function RehearsalStudio() {
         </div>
       </div>
 
+      <div className="rounded-2xl border border-primary/20 bg-primary/5 p-3.5 md:p-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Orbit size={16} className="text-primary" />
+              推荐路径（可跳过）
+            </div>
+            <div className="mt-1 text-xs leading-5 text-dim">
+              这是质量控制的推荐顺序，不是唯一入口；演员时间池可独立维护，未确认剧本也可以先生成调度预览。
+            </div>
+          </div>
+          <div className="text-[11px] text-primary">
+            {!hasAnalysis ? "第 1 步 / 4 步" : !isReviewed ? "第 2 步 / 4 步" : !hasSchedule ? "第 3 步 / 4 步" : "第 4 步 / 4 步"}
+          </div>
+        </div>
+
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <WorkflowStep number="01" title="解析剧本" detail="分场 · 角色 · 道具" active={!hasAnalysis} done={hasAnalysis} />
+          <WorkflowStep number="02" title="人工确认" detail="标题 · 角色 · 道具可修改" active={hasAnalysis && !isReviewed} done={isReviewed} />
+          <WorkflowStep number="03" title={isSchedulePreview ? "调度预览" : "调度 Agent"} detail="任务 · 清单 · 时长 · 并行组" active={isReviewed && !hasSchedule || isSchedulePreview} done={hasSchedule} />
+          <WorkflowStep number="04" title="自动排班" detail="可用时间 · 未排班原因" active={hasSchedule && !hasScheduledTasks} done={hasScheduledTasks} />
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-primary/15 pt-3">
+          {!analysis ? (
+            <Button type="button" size="sm" onClick={() => void analyze()} disabled={busy || !scriptText.trim()}>
+              {busy ? <Loader2 className="animate-spin" /> : <Play size={14} />}
+              开始：运行解析 Agent
+            </Button>
+          ) : !isReviewed ? (
+            <>
+              <Button type="button" size="sm" onClick={startReview} disabled={busy || reviewing || scheduling}>
+                <Pencil size={14} /> 去人工确认场次
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => void generateSchedule(true)} disabled={scheduling || reviewing}>
+                {scheduling ? <Loader2 className="animate-spin" /> : <Layers3 size={14} />}
+                预览调度（未确认）
+              </Button>
+            </>
+          ) : !schedule ? (
+            <Button type="button" size="sm" onClick={() => void generateSchedule()} disabled={scheduling || reviewing}>
+              {scheduling ? <Loader2 className="animate-spin" /> : <Layers3 size={14} />}
+              生成排练调度草案
+            </Button>
+          ) : (
+            <span className="text-xs text-dim">下一步：在上方“演员时间池”中填写时间段，然后点击“自动排班当前任务”。</span>
+          )}
+        </div>
+      </div>
+
+      <Card>
+        <CardContent className="p-3.5 md:p-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-semibold">
+                <CalendarClock size={16} className="text-primary" />
+                演员时间池
+                <span className="rounded-full border border-teal/25 bg-teal/8 px-2 py-0.5 text-[10px] font-normal text-teal">可独立维护</span>
+              </div>
+              <div className="mt-1 text-xs leading-5 text-dim">
+                不依赖剧本解析。支持导入表格，先收集演员可用时间，保存后可以被不同剧本重复使用。
+              </div>
+            </div>
+            <input
+              ref={availabilityFileRef}
+              type="file"
+              className="hidden"
+              accept=".csv,.tsv,.txt"
+              onChange={(event) => void importAvailability(event.target.files?.[0])}
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => availabilityFileRef.current?.click()} disabled={availabilitySaving || planning}>
+                <FileUp size={14} /> 导入 CSV/TSV
+              </Button>
+              <Button type="button" variant="ghost" size="sm" onClick={downloadAvailabilityTemplate} disabled={availabilitySaving}>
+                <Download size={14} /> 下载模板
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => void persistAvailability()} disabled={availabilitySaving || planning}>
+                {availabilitySaving ? <Loader2 className="animate-spin" /> : <Save size={14} />}
+                保存演员档期
+              </Button>
+              {schedule && (
+                <Button type="button" size="sm" onClick={() => void planWithAvailability()} disabled={planning || reviewing || availabilitySaving}>
+                  {planning ? <Loader2 className="animate-spin" /> : <CalendarClock size={14} />}
+                  自动排班当前任务
+                </Button>
+              )}
+            </div>
+          </div>
+          <Textarea
+            value={availabilityText}
+            onChange={(event) => {
+              setAvailabilityText(event.target.value);
+              setAvailabilityMessage("");
+              setError("");
+            }}
+            className="mt-3 min-h-24 rounded-xl font-mono text-xs leading-6"
+            placeholder={'演员,日期,开始时间,结束时间\n小林,2026-08-25,19:00,21:00\n导演,2026-08-25,19:00,21:00'}
+          />
+          {availabilityMessage && <div className="mt-2 text-xs text-green">{availabilityMessage}</div>}
+        </CardContent>
+      </Card>
+
       {error && (
         <div className="flex items-center gap-2 rounded-xl border border-red/25 bg-red/8 px-4 py-2.5 text-sm text-red">
           <AlertTriangle size={16} />
           {error}
+        </div>
+      )}
+
+      {reviewMessage && (
+        <div className="flex items-center gap-2 rounded-xl border border-green/25 bg-green/8 px-4 py-2.5 text-sm text-green">
+          <CheckCircle2 size={16} />
+          {reviewMessage}
         </div>
       )}
 
@@ -128,7 +451,7 @@ export default function RehearsalStudio() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold">输入剧本</div>
-                <div className="mt-1 text-xs leading-5 text-dim">支持角色名 + 冒号台词，以及“第一场/第二场”分场标题。</div>
+                <div className="mt-1 text-xs leading-5 text-dim">粘贴剧本后运行 Agent；支持角色名 + 冒号台词，以及“第一场/第二场”分场标题。</div>
               </div>
               <input
                 ref={fileRef}
@@ -139,9 +462,15 @@ export default function RehearsalStudio() {
                   void upload(event.target.files?.[0]);
                 }}
               />
-              <Button type="button" variant="outline" size="sm" onClick={() => fileRef.current?.click()} disabled={busy}>
-                <FileUp size={15} /> 上传文件
-              </Button>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={() => fileRef.current?.click()} disabled={busy}>
+                  <FileUp size={15} /> 上传文件
+                </Button>
+                <Button type="button" size="sm" onClick={() => void analyze()} disabled={busy || !scriptText.trim()}>
+                  {busy ? <Loader2 className="animate-spin" /> : <Play size={15} />}
+                  {busy ? "分析中…" : "运行解析 Agent"}
+                </Button>
+              </div>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_96px]">
@@ -161,10 +490,7 @@ export default function RehearsalStudio() {
               <button type="button" className="text-xs text-dim hover:text-primary" onClick={() => setScriptText(DEMO_SCRIPT)}>
                 载入示例剧本
               </button>
-              <Button type="button" onClick={() => void analyze()} disabled={busy || !scriptText.trim()}>
-                {busy ? <Loader2 className="animate-spin" /> : <Play />}
-                {busy ? "Agent 分析中…" : "运行解析 Agent"}
-              </Button>
+              <span className="text-[11px] text-dim">运行后可人工确认场次，也可以先预览调度结果。</span>
             </div>
           </CardContent>
         </Card>
@@ -178,7 +504,7 @@ export default function RehearsalStudio() {
                 </div>
                 <div className="mt-5 text-xl font-semibold">等待一次 Agent 运行</div>
                 <p className="mt-2 max-w-md text-sm leading-6 text-dim">
-                  解析完成后，这里会展示场次、角色、台词、道具以及每一步 Agent trace。每条台词都能回指原剧本行号。
+                  点击页面上方或左侧的“运行解析 Agent”后，这里会展示场次、角色、台词、道具以及每一步 Agent trace。确认场次后还能继续生成调度任务和自动排班。
                 </p>
               </div>
             ) : (
@@ -186,12 +512,32 @@ export default function RehearsalStudio() {
                 <div className="flex flex-col gap-3 border-b border-border pb-4 md:flex-row md:items-start md:justify-between">
                   <div>
                     <div className="text-lg font-semibold">{analysis.title}</div>
-                    <div className="mt-1 text-xs text-dim">版本 {analysis.version_label} · {analysis.analysis_mode} parser · {analysis.parser_version}</div>
+                    <div className="mt-1 text-xs text-dim">版本 {analysis.version_label} · {ANALYSIS_MODE_LABELS[analysis.analysis_mode]} · {analysis.parser_version}</div>
+                    <div className="mt-2 inline-flex rounded-full border border-primary/20 bg-primary/8 px-2.5 py-1 text-[11px] text-primary">
+                      {REVIEW_STATUS_LABELS[analysis.review_status]}
+                    </div>
                   </div>
-                  <div className="flex flex-wrap gap-2 text-xs">
+                  <div className="flex flex-wrap items-center justify-end gap-2 text-xs">
                     <span className="rounded-full bg-primary/10 px-2.5 py-1 text-primary">{analysis.scenes.length} 场</span>
                     <span className="rounded-full bg-teal/10 px-2.5 py-1 text-teal">{analysis.characters.length} 角色</span>
                     <span className="rounded-full bg-orange/10 px-2.5 py-1 text-orange">{analysis.props.length} 道具</span>
+                    {!reviewing ? (
+                      <Button type="button" variant="outline" size="sm" onClick={startReview} disabled={busy}>
+                        <Pencil size={14} /> 人工确认
+                      </Button>
+                    ) : (
+                      <>
+                        <Button type="button" variant="outline" size="sm" onClick={cancelReview} disabled={busy}>
+                          <X size={14} /> 取消
+                        </Button>
+                        <Button type="button" variant="outline" size="sm" onClick={() => void submitReview("confirmed")} disabled={busy}>
+                          <CheckCircle2 size={14} /> 确认无误
+                        </Button>
+                        <Button type="button" size="sm" onClick={() => void submitReview("edited")} disabled={busy}>
+                          {busy ? <Loader2 className="animate-spin" /> : <Save size={14} />} 保存修改
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -218,20 +564,58 @@ export default function RehearsalStudio() {
                   <SummaryBlock icon={Package} label="道具" values={analysis.props.map((item) => `${item.name} · ${item.mention_count}次`)} />
                 </div>
 
+                {reviewing && (
+                  <div className="rounded-2xl border border-primary/20 bg-primary/5 p-3.5">
+                    <div className="text-sm font-semibold">人工确认节点</div>
+                    <div className="mt-1 text-xs leading-5 text-dim">可以修改每场的标题、角色和道具；台词原文与行号保持不变，作为后续调度的证据。</div>
+                    <Textarea
+                      value={reviewNote}
+                      onChange={(event) => setReviewNote(event.target.value)}
+                      className="mt-3 min-h-20 rounded-xl"
+                      placeholder="审核备注（可选）：例如第一场需要导演、演员小林到场。"
+                    />
+                  </div>
+                )}
+
                 <div className="space-y-3">
                   <div className="text-sm font-semibold">场次与台词</div>
-                  {analysis.scenes.map((scene) => (
+                  {analysis.scenes.map((scene) => {
+                    const draft = reviewDrafts[scene.scene_id];
+                    return (
                     <div key={scene.scene_id} className="rounded-2xl border border-border bg-background/45 p-3.5">
-                      <div className="flex flex-wrap items-start justify-between gap-2">
-                        <div>
-                          <div className="font-semibold">第 {scene.number} 场 · {scene.title}</div>
-                          <div className="mt-1 text-[11px] text-dim">原文第 {scene.source.start_line}–{scene.source.end_line} 行 · {scene.lines.length} 句台词</div>
+                      {reviewing && draft ? (
+                        <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                          <Input
+                            value={draft.title}
+                            onChange={(event) => updateReviewDraft(scene.scene_id, { title: event.target.value })}
+                            placeholder="场次标题"
+                          />
+                          <Input
+                            value={draft.characters.join("、")}
+                            onChange={(event) => updateReviewDraft(scene.scene_id, { characters: splitLabels(event.target.value) })}
+                            placeholder="角色，用顿号或逗号分隔"
+                          />
+                          <Input
+                            value={draft.props.join("、")}
+                            onChange={(event) => updateReviewDraft(scene.scene_id, { props: splitLabels(event.target.value) })}
+                            placeholder="道具，用顿号或逗号分隔"
+                          />
                         </div>
-                        <div className="flex flex-wrap justify-end gap-1">
-                          {scene.characters.map((character) => <span key={character} className="rounded-full bg-teal/10 px-2 py-0.5 text-[10px] text-teal">{character}</span>)}
-                          {scene.props.map((prop) => <span key={prop} className="rounded-full bg-orange/10 px-2 py-0.5 text-[10px] text-orange">道具·{prop}</span>)}
+                      ) : (
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div>
+                            <div className="font-semibold">第 {scene.number} 场 · {scene.title}</div>
+                            <div className="mt-1 text-[11px] text-dim">原文第 {scene.source.start_line}–{scene.source.end_line} 行 · {scene.lines.length} 句台词</div>
+                          </div>
+                          <div className="flex flex-wrap justify-end gap-1">
+                            {scene.characters.map((character) => <span key={character} className="rounded-full bg-teal/10 px-2 py-0.5 text-[10px] text-teal">{character}</span>)}
+                            {scene.props.map((prop) => <span key={prop} className="rounded-full bg-orange/10 px-2 py-0.5 text-[10px] text-orange">道具·{prop}</span>)}
+                          </div>
                         </div>
-                      </div>
+                      )}
+                      {reviewing && draft && (
+                        <div className="mt-2 text-[11px] text-dim">第 {scene.number} 场 · 原文第 {scene.source.start_line}–{scene.source.end_line} 行 · {scene.lines.length} 句台词</div>
+                      )}
                       <div className="mt-3 space-y-2">
                         {scene.lines.slice(0, 6).map((line) => (
                           <div key={line.line_id} className="rounded-xl bg-hover/55 px-3 py-2 text-sm leading-6">
@@ -243,8 +627,79 @@ export default function RehearsalStudio() {
                         {scene.lines.length > 6 && <div className="text-center text-[11px] text-dim">还有 {scene.lines.length - 6} 句台词未展开</div>}
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
+
+                {(analysis.review_status !== "pending" || schedule) && (
+                  <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <div className="flex items-center gap-2 text-sm font-semibold">
+                          <CalendarClock size={16} className="text-primary" />
+                          排练调度 Agent
+                          {schedule?.is_preview && (
+                            <span className="rounded-full border border-orange/25 bg-orange/10 px-2 py-0.5 text-[10px] font-normal text-orange">未确认预览</span>
+                          )}
+                        </div>
+                        <div className="mt-1 text-xs leading-5 text-dim">
+                          {schedule?.is_preview
+                            ? "这是基于当前解析结果的预览，允许你先检查任务和并行组；确认场次后再生成正式草案。"
+                            : "根据已确认的场次、演员和道具生成排练任务草案，并用资源冲突划分并行组。"}
+                        </div>
+                      </div>
+                      <Button type="button" variant="outline" size="sm" onClick={() => void generateSchedule(analysis.review_status === "pending")} disabled={scheduling || reviewing}>
+                        {scheduling ? <Loader2 className="animate-spin" /> : <Layers3 size={14} />}
+                        {schedule ? (schedule.is_preview ? "重新生成预览" : "重新生成草案") : "生成调度草案"}
+                      </Button>
+                    </div>
+
+                    {!schedule ? (
+                      <div className="mt-4 rounded-xl border border-border/70 bg-background/40 px-3 py-3 text-xs text-dim">
+                      调度 Agent 尚未运行。可以先生成未确认预览，也可以确认场次后生成正式排练任务。
+                      </div>
+                    ) : (
+                      <div className="mt-4 space-y-3">
+                        <div className="flex flex-wrap gap-2 text-[11px] text-dim">
+                          <span className="rounded-full bg-primary/10 px-2.5 py-1 text-primary">{schedule.tasks.length} 个场次任务</span>
+                          <span className="rounded-full bg-teal/10 px-2.5 py-1 text-teal">{new Set(schedule.tasks.map((task) => task.parallel_group)).size} 个并行组</span>
+                        </div>
+                        <div className="grid gap-2 md:grid-cols-2">
+                          {schedule.tasks.map((task) => (
+                            <div key={task.task_id} className="rounded-xl border border-border bg-background/45 p-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="text-sm font-semibold">第 {task.scene_number} 场 · {task.title}</div>
+                                <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary">并行组 {task.parallel_group}</span>
+                              </div>
+                              <div className="mt-2 flex items-center gap-1.5 text-[11px] text-dim">
+                                <Clock3 size={13} /> 预计 {task.estimated_minutes} 分钟
+                              </div>
+                              <div className="mt-2 text-[11px] leading-5 text-dim">{task.parallel_reason || "按演员和道具资源划分并行组"}</div>
+                              {task.status === "scheduled" ? (
+                                <div className="mt-2 rounded-lg bg-green/8 px-2 py-1.5 text-xs text-green">
+                                  已排班：{task.scheduled_date} · {task.scheduled_start}–{task.scheduled_end}
+                                </div>
+                              ) : task.status === "unassigned" ? (
+                                <div className="mt-2 rounded-lg bg-red/8 px-2 py-1.5 text-xs text-red">
+                                  未排班：{task.unassigned_reason}
+                                </div>
+                              ) : null}
+                              <div className="mt-2 text-xs leading-5 text-dim">
+                                演员：{task.required_characters.length > 0 ? task.required_characters.join("、") : "待确认"}
+                              </div>
+                              <div className="text-xs leading-5 text-dim">
+                                道具：{task.props.length > 0 ? task.props.join("、") : "无"}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="rounded-xl border border-border bg-background/35 px-3 py-2.5 text-xs leading-5 text-dim">
+                          排班使用页面上方的“演员时间池”。你可以先保存演员档期，再回来生成任务；生成任务后点击上方“自动排班当前任务”即可。
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </CardContent>
@@ -272,6 +727,38 @@ function SummaryBlock({
       <div className="mt-2 flex flex-wrap gap-1.5">
         {values.length > 0 ? values.map((value) => <span key={value} className="rounded-full bg-hover px-2 py-1 text-[11px] text-dim">{value}</span>) : <span className="text-xs text-dim">暂未识别</span>}
       </div>
+    </div>
+  );
+}
+
+function WorkflowStep({
+  number,
+  title,
+  detail,
+  active,
+  done,
+}: {
+  number: string;
+  title: string;
+  detail: string;
+  active: boolean;
+  done: boolean;
+}) {
+  return (
+    <div className={cn(
+      "rounded-xl border px-3 py-2.5",
+      active ? "border-primary/35 bg-primary/10" : done ? "border-green/25 bg-green/8" : "border-border bg-background/35",
+    )}>
+      <div className="flex items-center gap-2">
+        <span className={cn(
+          "flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold",
+          active ? "bg-primary text-primary-foreground" : done ? "bg-green/15 text-green" : "bg-hover text-dim",
+        )}>
+          {done ? "✓" : number}
+        </span>
+        <span className="text-xs font-semibold">{title}</span>
+      </div>
+      <div className="mt-1 pl-7 text-[10px] leading-4 text-dim">{detail}</div>
     </div>
   );
 }

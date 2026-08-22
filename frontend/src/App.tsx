@@ -24,6 +24,18 @@ import Onboarding from "./pages/Onboarding";
 import NotFound from "./pages/NotFound";
 import PersonalAgent from "./pages/PersonalAgent";
 import RehearsalStudio from "./pages/RehearsalStudio";
+import ScriptRag from "./pages/ScriptRag";
+import ActorSchedule from "./pages/ActorSchedule";
+import LineReading from "./pages/LineReading";
+import RehearsalFeedback from "./pages/RehearsalFeedback";
+import RehearsalMetrics from "./pages/RehearsalMetrics";
+import RehearsalLogbook from "./pages/RehearsalLogbook";
+import SuggestionInbox from "./pages/SuggestionInbox";
+import KnowledgeAssets from "./pages/KnowledgeAssets";
+import VersionTracking from "./pages/VersionTracking";
+import StageVisualization from "./pages/StageVisualization";
+import ResourceManagement from "./pages/ResourceManagement";
+import ResourceFinance from "./pages/ResourceFinance";
 
 // 简历模块体量大(编辑器 + 9 套模板),按需加载避免拖慢首屏
 const ResumeManager = lazy(() => import("./pages/ResumeManager"));
@@ -91,6 +103,18 @@ function AppRoutes() {
                 <Route path="/profile" element={<Profile />} />
                 <Route path="/personal-agent" element={<PersonalAgent />} />
                 <Route path="/rehearsal" element={<RehearsalStudio />} />
+                <Route path="/rehearsal/rag" element={<ScriptRag />} />
+                <Route path="/rehearsal/schedule" element={<ActorSchedule />} />
+                <Route path="/rehearsal/line-reading" element={<LineReading />} />
+                <Route path="/rehearsal/feedback" element={<RehearsalFeedback />} />
+                <Route path="/rehearsal/metrics" element={<RehearsalMetrics />} />
+                <Route path="/rehearsal/logbook" element={<RehearsalLogbook />} />
+                <Route path="/rehearsal/suggestions" element={<SuggestionInbox />} />
+                <Route path="/rehearsal/knowledge" element={<KnowledgeAssets />} />
+                <Route path="/rehearsal/versions" element={<VersionTracking />} />
+                <Route path="/rehearsal/stage" element={<StageVisualization />} />
+                <Route path="/rehearsal/resources" element={<ResourceManagement />} />
+                <Route path="/rehearsal/resource-finance" element={<ResourceFinance />} />
                 <Route path="/profile/topic/:topic" element={<TopicDetail />} />
                 <Route path="/knowledge" element={<Knowledge />} />
                 <Route path="/graph" element={<Graph />} />
