@@ -30,6 +30,10 @@ def _scene_props(scene: Scene) -> set[str]:
     return {item.strip() for item in scene.props if item.strip()}
 
 
+def _scene_costumes(scene: Scene) -> set[str]:
+    return {item.strip() for item in scene.costumes if item.strip()}
+
+
 def _line_key(line: DialogueLine) -> tuple[str, str]:
     return line.character.strip(), _normalize(line.text)
 
@@ -95,7 +99,7 @@ class ScriptVersionDiffAgent:
         unchanged_count = sum(item.status == "unchanged" for item in scene_diffs)
         total_changes = added_count + removed_count + changed_count
         if total_changes == 0:
-            summary = "两个剧本版本的场次、角色、道具和台词没有检测到变化。"
+            summary = "两个剧本版本的场次、角色、道具、服装和台词没有检测到变化。"
         else:
             summary = (
                 f"共检测到 {total_changes} 个受影响场次：新增 {added_count} 场、"
@@ -132,6 +136,7 @@ class ScriptVersionDiffAgent:
         if old_scene is None and new_scene is not None:
             characters = sorted(_scene_characters(new_scene))
             props = sorted(_scene_props(new_scene))
+            costumes = sorted(_scene_costumes(new_scene))
             return SceneDiff(
                 scene_key=f"scene-{number}",
                 scene_number=number,
@@ -140,11 +145,14 @@ class ScriptVersionDiffAgent:
                 new_title=new_scene.title,
                 added_characters=characters,
                 added_props=props,
+                added_costumes=costumes,
                 line_changes=[_line_change("added", None, line) for line in new_scene.lines],
                 impact=self._impact(
                     characters,
                     [],
                     props,
+                    [],
+                    costumes,
                     [],
                     [line.character for line in new_scene.lines],
                 ),
@@ -153,6 +161,7 @@ class ScriptVersionDiffAgent:
         if old_scene is not None and new_scene is None:
             characters = sorted(_scene_characters(old_scene))
             props = sorted(_scene_props(old_scene))
+            costumes = sorted(_scene_costumes(old_scene))
             return SceneDiff(
                 scene_key=f"scene-{number}",
                 scene_number=number,
@@ -161,12 +170,15 @@ class ScriptVersionDiffAgent:
                 old_title=old_scene.title,
                 removed_characters=characters,
                 removed_props=props,
+                removed_costumes=costumes,
                 line_changes=[_line_change("removed", line, None) for line in old_scene.lines],
                 impact=self._impact(
                     [],
                     characters,
                     [],
                     props,
+                    [],
+                    costumes,
                     [line.character for line in old_scene.lines],
                 ),
                 summary=f"删除第 {number} 场：{old_scene.title}。",
@@ -177,13 +189,26 @@ class ScriptVersionDiffAgent:
         new_characters = _scene_characters(new_scene)
         old_props = _scene_props(old_scene)
         new_props = _scene_props(new_scene)
+        old_costumes = _scene_costumes(old_scene)
+        new_costumes = _scene_costumes(new_scene)
         line_changes = _compare_lines(old_scene.lines, new_scene.lines)
         added_characters = sorted(new_characters - old_characters)
         removed_characters = sorted(old_characters - new_characters)
         added_props = sorted(new_props - old_props)
         removed_props = sorted(old_props - new_props)
+        added_costumes = sorted(new_costumes - old_costumes)
+        removed_costumes = sorted(old_costumes - new_costumes)
         title_changed = _normalize(old_scene.title) != _normalize(new_scene.title)
-        changed = bool(title_changed or added_characters or removed_characters or added_props or removed_props or line_changes)
+        changed = bool(
+            title_changed
+            or added_characters
+            or removed_characters
+            or added_props
+            or removed_props
+            or added_costumes
+            or removed_costumes
+            or line_changes
+        )
 
         if not changed:
             summary = f"第 {number} 场没有变化。"
@@ -197,6 +222,8 @@ class ScriptVersionDiffAgent:
                 pieces.append("角色清单变化")
             if added_props or removed_props:
                 pieces.append("道具清单变化")
+            if added_costumes or removed_costumes:
+                pieces.append("服装清单变化")
             summary = f"第 {number} 场变更：" + "、".join(pieces) + "。"
 
         return SceneDiff(
@@ -211,12 +238,16 @@ class ScriptVersionDiffAgent:
             removed_characters=removed_characters,
             added_props=added_props,
             removed_props=removed_props,
+            added_costumes=added_costumes,
+            removed_costumes=removed_costumes,
             line_changes=line_changes,
             impact=self._impact(
                 added_characters,
                 removed_characters,
                 added_props,
                 removed_props,
+                added_costumes,
+                removed_costumes,
                 [change.character for change in line_changes],
             ),
             summary=summary,
@@ -228,6 +259,8 @@ class ScriptVersionDiffAgent:
         removed_characters: list[str],
         added_props: list[str],
         removed_props: list[str],
+        added_costumes: list[str],
+        removed_costumes: list[str],
         line_characters: list[str],
     ) -> list[str]:
         impact: list[str] = []
@@ -239,6 +272,10 @@ class ScriptVersionDiffAgent:
             impact.append("新增道具：" + "、".join(added_props))
         if removed_props:
             impact.append("移除道具：" + "、".join(removed_props))
+        if added_costumes:
+            impact.append("新增服装：" + "、".join(added_costumes))
+        if removed_costumes:
+            impact.append("移除服装：" + "、".join(removed_costumes))
         unique_line_characters = sorted(set(line_characters))
         if unique_line_characters:
             impact.append("需重新核对台词：" + "、".join(unique_line_characters))
@@ -263,6 +300,7 @@ class ScriptVersionDiffAgent:
                 [*scene.added_characters, *scene.removed_characters, *line_characters]
             )
             affected_props = cls._unique([*scene.added_props, *scene.removed_props])
+            affected_costumes = cls._unique([*scene.added_costumes, *scene.removed_costumes])
             roster_changed = bool(scene.added_characters or scene.removed_characters)
             schedule_severity = "high" if scene.status in {"added", "removed"} or roster_changed else "medium"
             if scene.status == "added":
@@ -305,7 +343,7 @@ class ScriptVersionDiffAgent:
                     )
                 )
 
-            if affected_props:
+            if affected_props or affected_costumes:
                 impacts.append(
                     VersionDownstreamImpact(
                         impact_type="resource",
@@ -315,11 +353,14 @@ class ScriptVersionDiffAgent:
                         scene_title=scene_title,
                         affected_characters=[],
                         affected_props=affected_props,
+                        affected_costumes=affected_costumes,
                         reason=(
-                            f"第 {scene.scene_number} 场的道具清单发生变化：{'、'.join(affected_props)}。"
+                            f"第 {scene.scene_number} 场的资源清单发生变化："
+                            f"道具{'、'.join(affected_props) if affected_props else '无变化'}；"
+                            f"服装{'、'.join(affected_costumes) if affected_costumes else '无变化'}。"
                             "现有库存结论需要重新确认。"
                         ),
-                        action="重新执行排练前道具检查，确认库存与维修状态。",
+                        action="重新执行排练前道具和服装检查，确认库存、维修状态与可用容量。",
                     )
                 )
         return impacts
@@ -335,12 +376,13 @@ def attach_resource_audit_matches(
 
     enriched: list[VersionDownstreamImpact] = []
     for impact in diff.downstream_impacts:
-        if impact.impact_type != "resource" or not impact.affected_props:
+        if impact.impact_type != "resource" or not (impact.affected_props or impact.affected_costumes):
             enriched.append(impact)
             continue
 
         matches: list[VersionResourceAuditMatch] = []
         seen: set[tuple[str, str]] = set()
+        affected_labels = [*impact.affected_props, *impact.affected_costumes]
         for audit in audits:
             for change in audit.changes:
                 label = _normalize(change.label)
@@ -348,7 +390,7 @@ def attach_resource_audit_matches(
                     prop_key == label
                     or (len(prop_key) >= 2 and prop_key in label)
                     or (len(label) >= 2 and label in prop_key)
-                    for prop_key in (_normalize(prop) for prop in impact.affected_props)
+                    for prop_key in (_normalize(resource) for resource in affected_labels)
                     if prop_key and label
                 )
                 if not related or (audit.audit_id, change.resource_id) in seen:

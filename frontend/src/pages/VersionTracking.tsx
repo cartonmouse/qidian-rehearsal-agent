@@ -308,7 +308,7 @@ function DownstreamImpactPanel({
           <CheckCircle2 className="mt-0.5 shrink-0 text-green" size={18} />
           <div>
             <div className="font-semibold">没有需要传递给下游模块的变化</div>
-            <p className="mt-1 text-sm leading-6 text-dim">两个版本的场次、角色、道具和台词保持一致，现有调度与对词记录可以继续使用。</p>
+            <p className="mt-1 text-sm leading-6 text-dim">两个版本的场次、角色、道具、服装和台词保持一致，现有调度与对词记录可以继续使用。</p>
           </div>
         </CardContent>
       </Card>
@@ -329,7 +329,7 @@ function DownstreamImpactPanel({
           <div className="flex flex-wrap gap-1.5 text-[10px]">
             {diff.requires_schedule_review && <ImpactFlag icon={<CalendarClock size={12} />} label="排班需要复核" />}
             {diff.requires_line_reading_review && <ImpactFlag icon={<MessageCircle size={12} />} label="对词需要重开" />}
-            {diff.requires_resource_review && <ImpactFlag icon={<Package size={12} />} label="道具需要复核" />}
+            {diff.requires_resource_review && <ImpactFlag icon={<Package size={12} />} label="资源需要复核" />}
           </div>
         </div>
 
@@ -381,7 +381,7 @@ function DownstreamImpactCard({
     },
     resource: {
       icon: <Package size={15} />,
-      title: "需要重新检查道具",
+      title: "需要重新检查资源",
       button: "打开资源管理",
       path: "/rehearsal/resources",
     },
@@ -392,7 +392,7 @@ function DownstreamImpactCard({
     info: "border-teal/25 bg-teal/5",
   };
   const resourceReviewPath = impact.impact_type === "resource"
-    ? `${meta.path}?script_id=${encodeURIComponent(scriptId)}&scene=${encodeURIComponent(impact.scene_title)}&props=${encodeURIComponent(impact.affected_props.join("、"))}${impact.resource_audit_matches[0] ? `&audit_id=${encodeURIComponent(impact.resource_audit_matches[0].audit_id)}` : ""}`
+    ? `${meta.path}?script_id=${encodeURIComponent(scriptId)}&scene=${encodeURIComponent(impact.scene_title)}&props=${encodeURIComponent(impact.affected_props.join("、"))}&costumes=${encodeURIComponent(impact.affected_costumes.join("、"))}${impact.resource_audit_matches[0] ? `&audit_id=${encodeURIComponent(impact.resource_audit_matches[0].audit_id)}` : ""}`
     : meta.path;
 
   return (
@@ -406,10 +406,11 @@ function DownstreamImpactCard({
       </div>
       <p className="mt-3 text-xs leading-5 text-text">{impact.reason}</p>
 
-      {(impact.affected_characters.length > 0 || impact.affected_props.length > 0) && (
+      {(impact.affected_characters.length > 0 || impact.affected_props.length > 0 || impact.affected_costumes.length > 0) && (
         <div className="mt-3 flex flex-wrap gap-1.5">
           {impact.affected_characters.map((character) => <span key={`actor-${character}`} className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary">演员：{character}</span>)}
           {impact.affected_props.map((prop) => <span key={`prop-${prop}`} className="rounded-full bg-card/80 px-2 py-0.5 text-[10px] text-dim">道具：{prop}</span>)}
+          {impact.affected_costumes.map((costume) => <span key={`costume-${costume}`} className="rounded-full bg-orange/10 px-2 py-0.5 text-[10px] text-orange">服装：{costume}</span>)}
         </div>
       )}
 

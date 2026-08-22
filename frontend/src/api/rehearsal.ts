@@ -183,6 +183,8 @@ export interface SceneDiff {
   removed_characters: string[];
   added_props: string[];
   removed_props: string[];
+  added_costumes: string[];
+  removed_costumes: string[];
   line_changes: ScriptLineChange[];
   impact: string[];
   summary: string;
@@ -196,6 +198,7 @@ export interface VersionDownstreamImpact {
   scene_title: string;
   affected_characters: string[];
   affected_props: string[];
+  affected_costumes: string[];
   resource_audit_matches: VersionResourceAuditMatch[];
   reason: string;
   action: string;

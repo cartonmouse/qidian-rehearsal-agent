@@ -1037,6 +1037,35 @@ def test_script_version_diff_marks_scene_line_and_actor_changes():
     assert resource_impact.affected_props == ["手电筒"]
 
 
+def test_script_version_diff_marks_costume_changes_as_resource_impact():
+    parser = ScriptAnalysisAgent()
+    previous = parser.run(
+        title="服装版本",
+        version_label="v1",
+        script_text="第一场\n（林澄穿灰色外套。）\n林澄：开始。",
+    )
+    current = parser.run(
+        title="服装版本",
+        version_label="v2",
+        script_text="第一场\n（林澄穿黑色西装。）\n林澄：开始。",
+    )
+
+    diff = ScriptVersionDiffAgent().compare(previous, current)
+
+    scene = diff.scenes[0]
+    assert scene.status == "changed"
+    assert scene.added_costumes == ["黑色西装"]
+    assert scene.removed_costumes == ["灰色外套"]
+    assert "新增服装：黑色西装" in scene.impact
+    assert "移除服装：灰色外套" in scene.impact
+    resource_impact = next(item for item in diff.downstream_impacts if item.impact_type == "resource")
+    assert resource_impact.affected_props == []
+    assert resource_impact.affected_costumes == sorted(["黑色西装", "灰色外套"])
+    assert "服装" in resource_impact.reason
+    assert "可用容量" in resource_impact.action
+    assert diff.requires_resource_review is True
+
+
 def test_script_version_diff_reports_identical_versions_without_changes():
     analysis = ScriptAnalysisAgent().run(
         title="稳定版本",
@@ -1046,7 +1075,7 @@ def test_script_version_diff_reports_identical_versions_without_changes():
 
     diff = ScriptVersionDiffAgent().compare(analysis, analysis)
 
-    assert diff.summary == "两个剧本版本的场次、角色、道具和台词没有检测到变化。"
+    assert diff.summary == "两个剧本版本的场次、角色、道具、服装和台词没有检测到变化。"
     assert diff.unchanged_scene_count == 1
     assert diff.scenes[0].status == "unchanged"
     assert diff.downstream_impacts == []
@@ -1205,6 +1234,34 @@ def test_version_diff_links_matching_user_resource_audits_to_resource_impacts():
     assert len(resource_impact.resource_audit_matches) == 1
     assert resource_impact.resource_audit_matches[0].label == "手电筒"
     assert resource_impact.resource_audit_matches[0].audit_id == audit.audit_id
+
+
+def test_version_diff_links_matching_costume_audits_to_resource_impacts():
+    parser = ScriptAnalysisAgent()
+    previous = parser.run(
+        title="服装审计关联",
+        version_label="v1",
+        script_text="第一场\n（林澄穿灰色外套。）\n林澄：开始。",
+    )
+    current = parser.run(
+        title="服装审计关联",
+        version_label="v2",
+        script_text="第一场\n（林澄穿黑色西装。）\n林澄：开始。",
+    )
+    diff = ScriptVersionDiffAgent().compare(previous, current)
+    audit = ResourceAuditAgent().compare(
+        resource_type="inventory",
+        operation="replace",
+        before=[],
+        after=[ResourceInventoryItem(resource_id="b" * 32, category="costume", name="黑色西装")],
+    )
+
+    assert audit is not None
+    enriched = attach_resource_audit_matches(diff, [audit])
+    resource_impact = next(item for item in enriched.downstream_impacts if item.impact_type == "resource")
+    assert resource_impact.affected_costumes == sorted(["黑色西装", "灰色外套"])
+    assert len(resource_impact.resource_audit_matches) == 1
+    assert resource_impact.resource_audit_matches[0].label == "黑色西装"
 
 
 def test_agent_run_metrics_aggregates_status_and_failed_trace_steps():
@@ -1793,6 +1850,6 @@ def test_rehearsal_agent_eval_set_is_reproducible_without_provider_keys():
 
     report = evaluate_cases()
 
-    assert report["total"] == 13
+    assert report["total"] == 14
     assert report["failed"] == 0
     assert report["pass_rate"] == 100.0

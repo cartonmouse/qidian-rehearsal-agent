@@ -32,6 +32,7 @@ from backend.rehearsal.rag_agent import ScriptRagAgent
 from backend.rehearsal.resource_agent import ResourceAgent
 from backend.rehearsal.schedule_agent import RehearsalScheduleAgent
 from backend.rehearsal.line_reading import LineReadingAgent, LineReadingSessionAgent
+from backend.rehearsal.version_diff import ScriptVersionDiffAgent
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -576,6 +577,44 @@ def _evaluate_line_reading_session(case: dict[str, Any], checks: list[CheckResul
     _check(checks, "source_lines_valid", source_lines_valid, expected.get("source_lines_valid", True))
 
 
+def _evaluate_version_diff(case: dict[str, Any], checks: list[CheckResult]) -> None:
+    current = _analysis(case)
+    previous = ScriptAnalysisAgent().run(
+        title=str(case["title"]),
+        version_label=str(case.get("previous_version_label", "eval-previous")),
+        script_text=str(case["previous_script_text"]),
+        script_id=f"eval-{case['id']}-previous",
+        analysis_mode=case.get("analysis_mode", "rules"),
+    )
+    diff = ScriptVersionDiffAgent().compare(previous, current)
+    expected = case["expected"]
+    _check(checks, "scene_statuses", [scene.status for scene in diff.scenes], expected.get("scene_statuses"))
+    changed_scene = next(
+        scene for scene in diff.scenes
+        if scene.scene_number == int(expected.get("scene_number", 1))
+    )
+    if "added_costumes" in expected:
+        _check(checks, "added_costumes", changed_scene.added_costumes, sorted(expected["added_costumes"]))
+    if "removed_costumes" in expected:
+        _check(checks, "removed_costumes", changed_scene.removed_costumes, sorted(expected["removed_costumes"]))
+    if "downstream_impact_types" in expected:
+        _check(
+            checks,
+            "downstream_impact_types",
+            [item.impact_type for item in diff.downstream_impacts],
+            expected["downstream_impact_types"],
+        )
+    resource_impact = next(
+        (item for item in diff.downstream_impacts if item.impact_type == "resource"),
+        None,
+    )
+    if "resource_affected_costumes" in expected:
+        actual = sorted(resource_impact.affected_costumes) if resource_impact else []
+        _check(checks, "resource_affected_costumes", actual, sorted(expected["resource_affected_costumes"]))
+    if "requires_resource_review" in expected:
+        _check(checks, "requires_resource_review", diff.requires_resource_review, expected["requires_resource_review"])
+
+
 def _run_case(case: dict[str, Any]) -> CaseResult:
     checks: list[CheckResult] = []
     try:
@@ -592,6 +631,8 @@ def _run_case(case: dict[str, Any]) -> CaseResult:
             _evaluate_rag(case, checks)
         elif kind == "line_reading_session":
             _evaluate_line_reading_session(case, checks)
+        elif kind == "version_diff":
+            _evaluate_version_diff(case, checks)
         else:
             raise ValueError(f"未知评估类型：{kind}")
     except Exception as exc:  # noqa: BLE001 - a failed case should be visible in the report

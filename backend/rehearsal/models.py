@@ -290,7 +290,7 @@ class ResourceAuditRecord(BaseModel):
 
 
 class VersionResourceAuditMatch(BaseModel):
-    """A user-scoped resource change matched to a changed script prop."""
+    """A user-scoped resource change matched to a changed script resource."""
 
     audit_id: str
     resource_type: Literal["inventory", "room", "music", "budget", "invoice"]
@@ -973,6 +973,8 @@ class SceneDiff(BaseModel):
     removed_characters: list[str] = Field(default_factory=list)
     added_props: list[str] = Field(default_factory=list)
     removed_props: list[str] = Field(default_factory=list)
+    added_costumes: list[str] = Field(default_factory=list)
+    removed_costumes: list[str] = Field(default_factory=list)
     line_changes: list[ScriptLineChange] = Field(default_factory=list)
     impact: list[str] = Field(default_factory=list)
     summary: str = ""
@@ -988,6 +990,7 @@ class VersionDownstreamImpact(BaseModel):
     scene_title: str = ""
     affected_characters: list[str] = Field(default_factory=list)
     affected_props: list[str] = Field(default_factory=list)
+    affected_costumes: list[str] = Field(default_factory=list)
     resource_audit_matches: list[VersionResourceAuditMatch] = Field(default_factory=list)
     reason: str
     action: str

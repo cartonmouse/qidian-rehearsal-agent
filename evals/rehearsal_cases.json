@@ -469,5 +469,24 @@
         "context_memory_contains": "先别急着解释，把你的犹豫留在门外。"
       }
     }
+  },
+  {
+    "id": "version-costume-resource-impact",
+    "kind": "version_diff",
+    "title": "服装版本影响",
+    "version_label": "v2",
+    "previous_version_label": "v1",
+    "previous_script_text": "第一场\n（林澄穿灰色外套。）\n林澄：开始。",
+    "script_text": "第一场\n（林澄穿黑色西装。）\n林澄：开始。",
+    "analysis_mode": "rules",
+    "expected": {
+      "scene_statuses": ["changed"],
+      "scene_number": 1,
+      "added_costumes": ["黑色西装"],
+      "removed_costumes": ["灰色外套"],
+      "downstream_impact_types": ["schedule", "resource"],
+      "resource_affected_costumes": ["黑色西装", "灰色外套"],
+      "requires_resource_review": true
+    }
   }
 ]
