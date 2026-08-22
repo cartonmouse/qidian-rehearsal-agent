@@ -265,6 +265,14 @@ def test_schedule_agent_batch_override_is_atomic_and_exposes_contract():
         "atomic": True,
     }
 
+    try:
+        agent.apply_manual_overrides(confirmed, overrides)
+    except ValueError as exc:
+        assert "批量重复提交被拒绝" in str(exc)
+    else:
+        raise AssertionError("already overridden tasks must reject a repeated batch")
+    assert len(confirmed.tool_calls) == len(planned.tool_calls) + 1
+
     invalid_overrides = [
         overrides[0],
         ScheduleOverrideRequest(

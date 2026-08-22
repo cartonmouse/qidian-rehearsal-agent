@@ -74,7 +74,8 @@
           {"date": "2026-08-26", "start": "19:00", "end": "19:45"},
           {"date": "2026-08-26", "start": "19:45", "end": "20:30"}
         ],
-        "count": 2
+        "count": 2,
+        "repeat_error_contains": "批量重复提交被拒绝"
       },
       "batch_override_errors": [
         {

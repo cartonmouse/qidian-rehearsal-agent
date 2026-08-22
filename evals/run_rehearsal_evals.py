@@ -359,6 +359,15 @@ def _evaluate_schedule(case: dict[str, Any], checks: list[CheckResult]) -> None:
         _check(checks, "batch_override_tool_name", batch_call.tool_name, "apply_manual_override_batch")
         _check(checks, "batch_override_atomic", batch_call.result.get("atomic"), True)
         _check(checks, "batch_override_count", batch_call.result.get("overridden_count"), batch_expected["count"])
+        repeat_message = batch_expected.get("repeat_error_contains")
+        if repeat_message:
+            try:
+                agent.apply_manual_overrides(confirmed, overrides)
+            except ValueError as exc:
+                found = repeat_message in str(exc)
+                _check(checks, "batch_override_repeat_rejected", found, True, passed=found)
+            else:
+                _check(checks, "batch_override_repeat_rejected", False, True, passed=False)
     for error_index, error_case in enumerate(expected.get("batch_override_errors", []), start=1):
         item_specs = error_case["items"]
         task_indices = error_case.get("task_indices", list(range(len(item_specs))))

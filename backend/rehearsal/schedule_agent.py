@@ -403,6 +403,10 @@ class RehearsalScheduleAgent:
             task = task_by_id.get(item.task_id)
             if task is None:
                 raise ValueError(f"找不到要批量确认的排练任务：{item.task_id}")
+            if task.status == "overridden":
+                raise ValueError(
+                    f"第 {task.scene_number} 场已经人工确认，批量重复提交被拒绝；如需修改请使用单任务覆盖"
+                )
             start_minutes = self._to_minutes(item.start)
             end_minutes = self._to_minutes(item.end)
             if end_minutes <= start_minutes:
