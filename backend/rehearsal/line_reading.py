@@ -47,7 +47,19 @@ _ADAPTIVE_SYSTEM_PROMPT = """你是话剧排练中的对词搭档。
 2. 默认保留原台词的情节事实、人物关系和行动意图，只允许为了回应练习者的临场表达而做自然、克制的口语调整。
 3. 不要替练习者说话，不要增加剧本没有的关键事实，不要改写成剧情总结。
 4. 如果练习者没有偏离原意，优先返回接近原台词的自然表达。
+5. 角色语气约束和排练上下文是软约束；它们不能覆盖剧本事实、角色名、turns 数量或来源顺序。
+6. 已发生的对词记录只用于保持上下文，不要把它们重复输出成剧情总结，也不要凭空补充记录中没有的事实。
 """
+
+
+_ROLE_TONE_LABELS = {
+    "natural": "自然",
+    "restrained": "克制",
+    "urgent": "急迫",
+    "warm": "温和",
+    "cold": "冷峻",
+    "uncertain": "犹疑",
+}
 
 
 def _load_json(text: str) -> dict[str, Any]:
@@ -97,6 +109,7 @@ class LineReadingAgent:
         request: LineReadingRequest,
         *,
         user_id: str | None = None,
+        context_transcript: list[LineReadingTranscriptItem] | None = None,
     ) -> LineReadingResponse:
         scene = next((item for item in analysis.scenes if item.scene_id == request.scene_id), None)
         if scene is None:
@@ -144,7 +157,10 @@ class LineReadingAgent:
                 turns, note = self._adapt_turns(
                     partner_lines,
                     role=role,
+                    role_tone=request.role_tone,
+                    context_note=request.context_note,
                     user_text=request.user_text.strip(),
+                    transcript_context=context_transcript,
                     user_id=user_id,
                 )
                 engine = "llm"
@@ -169,6 +185,8 @@ class LineReadingAgent:
             scene_title=scene.title,
             character=role,
             mode=request.mode,
+            role_tone=request.role_tone,
+            context_note=request.context_note,
             engine=engine,
             next_line_index=None if finished else index,
             assistant_turns=turns,
@@ -183,19 +201,35 @@ class LineReadingAgent:
         lines: list[DialogueLine],
         *,
         role: str,
+        role_tone: str,
+        context_note: str,
         user_text: str,
+        transcript_context: list[LineReadingTranscriptItem] | None,
         user_id: str | None,
     ) -> tuple[list[LineReadingTurn], str]:
         source_turns = [
             {"character": line.character, "text": line.text}
             for line in lines
         ]
+        history = [
+            {
+                "kind": item.kind,
+                "character": item.character,
+                "text": item.text,
+                "source_line": item.source_line,
+            }
+            for item in (transcript_context or [])[-8:]
+        ]
         llm = get_llm(user_id)
         response = llm.invoke([
             SystemMessage(_ADAPTIVE_SYSTEM_PROMPT),
             HumanMessage(
                 f"练习者角色：{role}\n"
+                f"角色语气约束：{_ROLE_TONE_LABELS.get(role_tone, role_tone)}（{role_tone}）\n"
+                f"本轮排练上下文：{context_note or '未提供'}\n"
                 f"练习者刚才的表达：{user_text or '尚未开口'}\n"
+                "已发生的对词记录（仅用于保持上下文，不得增加新事实）：\n"
+                f"{json.dumps(history, ensure_ascii=False)}\n"
                 "请改写以下非练习者参考台词，并保持 turns 顺序和数量：\n"
                 f"{json.dumps(source_turns, ensure_ascii=False)}"
             ),
@@ -248,12 +282,19 @@ class LineReadingSessionAgent:
                 raise ValueError("对词会话与当前剧本、场次或角色不匹配")
             if session.mode != request.mode:
                 raise ValueError("对词会话模式已变化，请重新开始当前场次")
+            if (
+                session.role_tone != request.role_tone
+                or session.context_note != request.context_note
+            ):
+                raise ValueError("对词会话的角色语气或排练上下文已变化，请重新开始当前场次")
             line_index = session.line_index
             session_id = session.session_id
             created_at = session.created_at
             previous_transcript = list(session.transcript)
             previous_turn_count = session.turn_count
             engine_counts = dict(session.engine_counts)
+            role_tone = session.role_tone
+            context_note = session.context_note
         else:
             line_index = request.line_index
             session_id = uuid4().hex
@@ -261,12 +302,21 @@ class LineReadingSessionAgent:
             previous_transcript = []
             previous_turn_count = 0
             engine_counts = {}
+            role_tone = request.role_tone
+            context_note = request.context_note
 
         effective_request = request.model_copy(update={
             "line_index": line_index,
             "session_id": session_id,
+            "role_tone": role_tone,
+            "context_note": context_note,
         })
-        response = self.agent.respond(analysis, effective_request, user_id=user_id)
+        response = self.agent.respond(
+            analysis,
+            effective_request,
+            user_id=user_id,
+            context_transcript=previous_transcript,
+        )
 
         additions: list[LineReadingTranscriptItem] = []
         if request.user_text.strip():
@@ -302,6 +352,8 @@ class LineReadingSessionAgent:
             scene_title=scene.title,
             character=request.character.strip(),
             mode=request.mode,
+            role_tone=role_tone,
+            context_note=context_note,
             line_index=next_index if next_index is not None else len(scene.lines),
             actor_prompt=response.actor_prompt,
             transcript=[*previous_transcript, *additions],
@@ -315,4 +367,6 @@ class LineReadingSessionAgent:
             "session_id": session_id,
             "transcript": updated_session.transcript,
             "turn_count": updated_session.turn_count,
+            "role_tone": role_tone,
+            "context_note": context_note,
         }), updated_session

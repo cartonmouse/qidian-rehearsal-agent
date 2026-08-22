@@ -472,6 +472,8 @@ export interface LineReadingTranscriptItem {
   source_line: number | null;
 }
 
+export type LineReadingTone = "natural" | "restrained" | "urgent" | "warm" | "cold" | "uncertain";
+
 export interface LineReadingSession {
   session_id: string;
   script_id: string;
@@ -479,6 +481,8 @@ export interface LineReadingSession {
   scene_title: string;
   character: string;
   mode: "strict" | "adaptive";
+  role_tone: LineReadingTone;
+  context_note: string;
   line_index: number;
   actor_prompt: LineReadingTurn | null;
   transcript: LineReadingTranscriptItem[];
@@ -495,6 +499,8 @@ export interface LineReadingResponse {
   scene_title: string;
   character: string;
   mode: "strict" | "adaptive";
+  role_tone: LineReadingTone;
+  context_note: string;
   engine: "strict" | "llm" | "fallback";
   next_line_index: number | null;
   assistant_turns: LineReadingTurn[];
@@ -936,6 +942,8 @@ export async function readLine(
     scene_id: string;
     character: string;
     mode: "strict" | "adaptive";
+    role_tone: LineReadingTone;
+    context_note: string;
     line_index: number;
     user_text?: string;
     session_id?: string;

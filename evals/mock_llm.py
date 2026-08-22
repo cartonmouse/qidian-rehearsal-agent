@@ -37,7 +37,8 @@ class ContractMockLLM:
                 payload = self.adaptive
             else:
                 prompt = messages[-1].get("content", "") if messages else ""
-                match = re.search(r'"character":\s*"([^"]+)"', prompt)
+                source_prompt = prompt.split("请改写以下非练习者参考台词", 1)[-1]
+                match = re.search(r'"character":\s*"([^"]+)"', source_prompt)
                 if not match or match.group(1) not in self.adaptive:
                     raise AssertionError("mock adaptive fixture is missing for the requested partner")
                 payload = self.adaptive[match.group(1)]

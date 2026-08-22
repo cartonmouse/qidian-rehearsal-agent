@@ -60,13 +60,14 @@
 
 ### 对词 Agent MVP
 
-`POST /api/rehearsal/scripts/{script_id}/line-reading` 推进一轮角色对词。请求包含场次、练习角色、模式、当前台词索引和演员本轮输入：
+`POST /api/rehearsal/scripts/{script_id}/line-reading` 推进一轮角色对词。请求包含场次、练习角色、模式、角色语气约束、排练上下文、当前台词索引和演员本轮输入：
 
 - `strict`：对方严格返回原台词，并对演员输入做轻量相似度反馈；不依赖 LLM。
-- `adaptive`：把原台词作为事实锚点，请 LLM 根据演员的临场表达生成对方回应；输出必须保持角色和台词数量一致。
+- `adaptive`：把原台词作为事实锚点，请 LLM 根据演员的临场表达、`role_tone` 和 `context_note` 生成对方回应；输出必须保持角色和台词数量一致。
 - LLM 未配置或调用失败时：自动回退到原台词，响应标记 `engine=fallback`，不阻断排练。
+- `role_tone` 支持 `natural`、`restrained`、`urgent`、`warm`、`cold`、`uncertain`；`context_note` 用于记录本轮导演要求或表演重点，最多 1000 字。
 
-对词页面只允许后端根据保存的原始场次推进 `line_index`，LLM 不能跳转进度、替换演员台词或修改剧本存档。
+对词页面只允许后端根据保存的原始场次推进 `line_index`，LLM 不能跳转进度、替换演员台词或修改剧本存档。会话会持久化语气和上下文配置，并把最近 8 条 transcript 作为下一轮适应性回应的记忆；续接时如果角色、模式、语气或上下文发生变化，后端会要求重新开始，避免把不同排练意图混在同一个会话里。
 
 ### 剧本问答 RAG Agent
 

@@ -432,6 +432,58 @@ def test_line_reading_session_agent_persists_cursor_transcript_and_ignores_stale
     assert second.transcript == finished.transcript
 
 
+def test_line_reading_session_keeps_role_profile_and_context_memory_stable():
+    analysis = ScriptAnalysisAgent().run(
+        title="带上下文的对词",
+        version_label="v1",
+        script_text="第一场\n导演：先别急着解释。\n小林：我知道了。\n导演：把信留下。",
+        script_id="line-profile",
+        analysis_mode="rules",
+    )
+    prompts = []
+
+    def invoke(messages):
+        prompts.append(messages[-1]["content"])
+        return '{"turns":[{"character":"导演","text":"先别急着解释。"}],"note":"保留停顿。"}'
+
+    fake_llm = SimpleNamespace(last_attempts=1, invoke=invoke)
+    request_kwargs = {
+        "scene_id": "scene-1",
+        "character": "小林",
+        "mode": "adaptive",
+        "role_tone": "restrained",
+        "context_note": "这一轮只练习句尾停顿。",
+    }
+
+    with patch("backend.rehearsal.line_reading.get_llm", return_value=fake_llm):
+        agent = LineReadingSessionAgent()
+        first, session = agent.advance(analysis, LineReadingRequest(**request_kwargs))
+        second, resumed = agent.advance(
+            analysis,
+            LineReadingRequest(**request_kwargs, line_index=99, user_text="我知道了。", session_id=session.session_id),
+            session=session,
+        )
+
+    assert first.role_tone == resumed.role_tone == session.role_tone == "restrained"
+    assert resumed.context_note == session.context_note == "这一轮只练习句尾停顿。"
+    assert "角色语气约束：克制（restrained）" in prompts[-1]
+    assert "这一轮只练习句尾停顿。" in prompts[-1]
+    assert "先别急着解释。" in prompts[-1]
+    assert second.engine == "llm"
+
+    with patch("backend.rehearsal.line_reading.get_llm", return_value=fake_llm):
+        try:
+            agent.advance(
+                analysis,
+                LineReadingRequest(**{**request_kwargs, "role_tone": "urgent", "session_id": session.session_id}),
+                session=session,
+            )
+        except ValueError as exc:
+            assert "角色语气或排练上下文已变化" in str(exc)
+        else:
+            raise AssertionError("changing the role profile must restart the session")
+
+
 def test_rehearsal_mirror_keeps_raw_notes_and_structures_feedback_without_llm():
     request = RehearsalFeedbackRequest(
         rehearsal_date="2026-08-25",

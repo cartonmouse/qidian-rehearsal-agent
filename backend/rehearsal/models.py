@@ -486,9 +486,16 @@ class LineReadingRequest(BaseModel):
     scene_id: str = Field(min_length=1, max_length=100)
     character: str = Field(min_length=1, max_length=100)
     mode: Literal["strict", "adaptive"] = "strict"
+    role_tone: Literal["natural", "restrained", "urgent", "warm", "cold", "uncertain"] = "natural"
+    context_note: str = Field(default="", max_length=1_000)
     line_index: int = Field(default=0, ge=0)
     user_text: str = Field(default="", max_length=20_000)
     session_id: str | None = Field(default=None, max_length=32)
+
+    @field_validator("context_note")
+    @classmethod
+    def normalize_context_note(cls, value: str) -> str:
+        return value.strip()
 
 
 class LineReadingTurn(BaseModel):
@@ -515,6 +522,8 @@ class LineReadingSession(BaseModel):
     scene_title: str
     character: str
     mode: Literal["strict", "adaptive"]
+    role_tone: Literal["natural", "restrained", "urgent", "warm", "cold", "uncertain"] = "natural"
+    context_note: str = Field(default="", max_length=1_000)
     line_index: int = Field(default=0, ge=0)
     actor_prompt: LineReadingTurn | None = None
     transcript: list[LineReadingTranscriptItem] = Field(default_factory=list)
@@ -531,6 +540,8 @@ class LineReadingResponse(BaseModel):
     scene_title: str
     character: str
     mode: Literal["strict", "adaptive"]
+    role_tone: Literal["natural", "restrained", "urgent", "warm", "cold", "uncertain"] = "natural"
+    context_note: str = Field(default="", max_length=1_000)
     engine: Literal["strict", "llm", "fallback"]
     next_line_index: int | None = Field(default=None, ge=0)
     assistant_turns: list[LineReadingTurn] = Field(default_factory=list)

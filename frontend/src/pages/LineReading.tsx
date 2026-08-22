@@ -19,6 +19,7 @@ import {
   readLine,
   type LineReadingResponse,
   type LineReadingTranscriptItem,
+  type LineReadingTone,
   type ScriptAnalysis,
   type ScriptSummary,
 } from "@/api/rehearsal";
@@ -40,8 +41,27 @@ const ENGINE_LABELS: Record<LineReadingResponse["engine"], string> = {
   fallback: "规则降级",
 };
 
-function lineSessionStorageKey(scriptId: string, sceneId: string, character: string, mode: string): string {
-  return `qidian-line-reading:${scriptId}:${sceneId}:${character}:${mode}`;
+const ROLE_TONE_OPTIONS: Array<{ value: LineReadingTone; label: string; detail: string }> = [
+  { value: "natural", label: "自然", detail: "按原角色节奏" },
+  { value: "restrained", label: "克制", detail: "压低情绪外放" },
+  { value: "urgent", label: "急迫", detail: "加快反应张力" },
+  { value: "warm", label: "温和", detail: "保留关系温度" },
+  { value: "cold", label: "冷峻", detail: "减少情绪泄露" },
+  { value: "uncertain", label: "犹疑", detail: "保留停顿和迟疑" },
+];
+
+function lineSessionStorageKey(
+  scriptId: string,
+  sceneId: string,
+  character: string,
+  mode: string,
+  roleTone: LineReadingTone = "natural",
+  contextNote = "",
+): string {
+  const profile = roleTone === "natural" && !contextNote.trim()
+    ? ""
+    : `:${encodeURIComponent(`${roleTone}:${contextNote.trim()}`)}`;
+  return `qidian-line-reading:${scriptId}:${sceneId}:${character}:${mode}${profile}`;
 }
 
 function toTranscriptItem(item: LineReadingTranscriptItem): TranscriptItem {
@@ -67,6 +87,8 @@ export default function LineReading() {
   const [sceneId, setSceneId] = useState("");
   const [character, setCharacter] = useState("");
   const [mode, setMode] = useState<"strict" | "adaptive">("strict");
+  const [roleTone, setRoleTone] = useState<LineReadingTone>("natural");
+  const [contextNote, setContextNote] = useState("");
   const [lineIndex, setLineIndex] = useState(0);
   const [sessionId, setSessionId] = useState("");
   const [sessionTurnCount, setSessionTurnCount] = useState(0);
@@ -90,10 +112,7 @@ export default function LineReading() {
       .filter((item, index, items) => items.indexOf(item) === index);
   }, [selectedScene]);
 
-  const resetSession = useCallback(() => {
-    if (selectedScriptId && sceneId && character) {
-      window.localStorage.removeItem(lineSessionStorageKey(selectedScriptId, sceneId, character, mode));
-    }
+  const clearSessionState = useCallback(() => {
     setLineIndex(0);
     setSessionId("");
     setSessionTurnCount(0);
@@ -102,7 +121,21 @@ export default function LineReading() {
     setActorText("");
     setMessage("");
     setError("");
-  }, [character, mode, sceneId, selectedScriptId]);
+  }, []);
+
+  const resetSession = useCallback(() => {
+    if (selectedScriptId && sceneId && character) {
+      window.localStorage.removeItem(lineSessionStorageKey(
+        selectedScriptId,
+        sceneId,
+        character,
+        mode,
+        roleTone,
+        contextNote,
+      ));
+    }
+    clearSessionState();
+  }, [character, clearSessionState, contextNote, mode, roleTone, sceneId, selectedScriptId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -142,7 +175,7 @@ export default function LineReading() {
         const firstScene = item.scenes[0];
         setSceneId(firstScene?.scene_id || "");
         setCharacter(firstScene?.characters[0] || firstScene?.lines[0]?.character || "");
-        resetSession();
+        clearSessionState();
       })
       .catch((reason) => {
         if (!cancelled) setError(reason instanceof Error ? reason.message : "剧本详情加载失败");
@@ -153,17 +186,24 @@ export default function LineReading() {
     return () => {
       cancelled = true;
     };
-  }, [resetSession, selectedScriptId]);
+  }, [clearSessionState, selectedScriptId]);
 
   useEffect(() => {
     if (!analysis || !selectedScriptId || !sceneId || !character || sessionId) return;
-    const key = lineSessionStorageKey(selectedScriptId, sceneId, character, mode);
+    const key = lineSessionStorageKey(selectedScriptId, sceneId, character, mode, roleTone, contextNote);
     const storedSessionId = window.localStorage.getItem(key);
     if (!storedSessionId) return;
     let cancelled = false;
     void getLineReadingSession(analysis.script_id, storedSessionId)
       .then((session) => {
-        if (cancelled || session.scene_id !== sceneId || session.character !== character || session.mode !== mode) return;
+        if (
+          cancelled
+          || session.scene_id !== sceneId
+          || session.character !== character
+          || session.mode !== mode
+          || session.role_tone !== roleTone
+          || session.context_note !== contextNote
+        ) return;
         setSessionId(session.session_id);
         setSessionTurnCount(session.turn_count);
         setLineIndex(session.line_index);
@@ -178,7 +218,7 @@ export default function LineReading() {
     return () => {
       cancelled = true;
     };
-  }, [analysis, character, mode, sceneId, selectedScriptId, sessionId]);
+  }, [analysis, character, contextNote, mode, roleTone, sceneId, selectedScriptId, sessionId]);
 
   function changeScene(value: string) {
     const nextScene = analysis?.scenes.find((scene) => scene.scene_id === value);
@@ -197,6 +237,11 @@ export default function LineReading() {
     resetSession();
   }
 
+  function changeRoleTone(value: LineReadingTone) {
+    resetSession();
+    setRoleTone(value);
+  }
+
   async function advance(userText = "", startingIndex?: number, forceNewSession = false) {
     if (!analysis || !selectedScene || !character) return;
     const currentLineIndex = startingIndex ?? lineIndex;
@@ -212,6 +257,8 @@ export default function LineReading() {
         scene_id: selectedScene.scene_id,
         character,
         mode,
+        role_tone: roleTone,
+        context_note: contextNote,
         line_index: currentLineIndex,
         user_text: userText,
         session_id: forceNewSession ? undefined : sessionId || undefined,
@@ -233,6 +280,11 @@ export default function LineReading() {
 
   const hasSession = transcript.length > 0 || actorPrompt !== null;
   const finished = hasSession && actorPrompt === null && lineIndex >= (selectedScene?.lines.length || 0);
+
+  function changeContextNote(value: string) {
+    if (hasSession) resetSession();
+    setContextNote(value);
+  }
 
   function startOrRestart() {
     if (hasSession) {
@@ -332,6 +384,28 @@ export default function LineReading() {
                     <ModeButton active={mode === "adaptive"} onClick={() => changeMode("adaptive")} title="适应性模式" detail="LLM 顺着语义回应" />
                   </div>
                 </div>
+
+                <FieldLabel label="角色语气约束">
+                  <select
+                    value={roleTone}
+                    onChange={(event) => changeRoleTone(event.target.value as LineReadingTone)}
+                    disabled={sessionLoading}
+                    className="h-10 w-full rounded-lg border border-input bg-input-bg px-3 text-sm text-text outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {ROLE_TONE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label} · {item.detail}</option>)}
+                  </select>
+                </FieldLabel>
+
+                <FieldLabel label="本轮排练上下文">
+                  <Textarea
+                    value={contextNote}
+                    onChange={(event) => changeContextNote(event.target.value)}
+                    disabled={sessionLoading}
+                    className="min-h-20 rounded-xl text-sm leading-5 disabled:cursor-not-allowed disabled:opacity-60"
+                    placeholder="例如：这一轮重点练习句尾停顿，不把犹豫解释成愤怒。"
+                  />
+                  <div className="mt-1 text-[10px] leading-4 text-dim">会话会保存这条上下文；续接时 Agent 会读取最近对词记录，但不会改写原剧本。</div>
+                </FieldLabel>
 
                 {selectedScene && (
                   <div className="rounded-xl border border-border bg-background/35 px-3 py-3 text-xs leading-5 text-dim">

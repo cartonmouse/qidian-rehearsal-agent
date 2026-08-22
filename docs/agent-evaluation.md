@@ -16,7 +16,7 @@
 | `rag-evidence-and-no-hallucination` | RAG 是否返回带原文行号的证据，且回答引用证据 ID |
 | `rag-empty-stops-guessing` | 没有证据时是否明确停止猜测 |
 | `line-reading-session-resume` | 对词会话是否保存游标、transcript，并拒绝客户端跳跃进度 |
-| `llm-contract-source-and-adaptive` | 用确定性 mock provider 验证 LLM 结构化解析、原文锚定、适应性对词响应和多轮会话恢复 |
+| `llm-contract-source-and-adaptive` | 用确定性 mock provider 验证 LLM 结构化解析、原文锚定、角色语气/排练上下文、适应性对词响应和多轮会话恢复 |
 
 评估结果按“用例通过率”汇总，同时保留每个检查项的实际值和预期值。失败时会记录具体用例、检查项和异常，便于定位是解析回归、排班边界变化，还是证据回指丢失。
 
@@ -38,4 +38,4 @@ python -m evals.run_rehearsal_evals
 2. 把正常路径、边界路径和拒答路径放进同一套回归；“没有共同时间”和“没有证据”不是异常，而是产品必须解释的结果。
 3. 评估集不绑定供应商 API。规则路径可在 CI 中稳定运行，LLM 路径用确定性 mock provider 验证结构化合同，真实供应商只负责运行时生成。
 
-后续扩展方向是把更多真实排练样本纳入评估，并继续增加角色语气约束、上下文记忆和批量排班确认的合同测试。
+后续扩展方向是把更多真实排练样本纳入评估，并继续增加批量排班确认的合同测试。

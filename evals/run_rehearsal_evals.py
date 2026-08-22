@@ -122,6 +122,8 @@ def _evaluate_script_analysis(case: dict[str, Any], checks: list[CheckResult]) -
 def _evaluate_llm_contract(case: dict[str, Any], checks: list[CheckResult]) -> None:
     """Exercise the optional provider path with deterministic fixture output."""
     mock_config = case["mock"]
+    role_tone = str(case.get("role_tone", "natural"))
+    context_note = str(case.get("context_note", ""))
     mock = ContractMockLLM(
         scenes=mock_config["scenes"],
         adaptive=mock_config["adaptive"],
@@ -142,6 +144,8 @@ def _evaluate_llm_contract(case: dict[str, Any], checks: list[CheckResult]) -> N
                 scene_id=str(case["scene_id"]),
                 character=str(case["character"]),
                 mode="adaptive",
+                role_tone=role_tone,
+                context_note=context_note,
                 line_index=int(case.get("line_index", 0)),
                 user_text=str(case.get("user_text", "")),
             ),
@@ -153,6 +157,8 @@ def _evaluate_llm_contract(case: dict[str, Any], checks: list[CheckResult]) -> N
                 scene_id=str(case["scene_id"]),
                 character=str(case["character"]),
                 mode="adaptive",
+                role_tone=role_tone,
+                context_note=context_note,
                 line_index=int(case.get("line_index", 0)),
             ),
         )
@@ -162,6 +168,8 @@ def _evaluate_llm_contract(case: dict[str, Any], checks: list[CheckResult]) -> N
                 scene_id=str(case["scene_id"]),
                 character=str(case["character"]),
                 mode="adaptive",
+                role_tone=role_tone,
+                context_note=context_note,
                 line_index=99,
                 user_text=str(case["expected"]["session"]["user_text"]),
                 session_id=session.session_id,
@@ -185,6 +193,19 @@ def _evaluate_llm_contract(case: dict[str, Any], checks: list[CheckResult]) -> N
         sorted(expected["props_include"]),
     )
     _check(checks, "mock_call_count", len(mock.calls), expected["mock_call_count"])
+    adaptive_prompts = [
+        messages[-1].get("content", "")
+        for messages in mock.calls
+        if messages and "请改写以下非练习者参考台词" in messages[-1].get("content", "")
+    ]
+    profile_contract_ok = bool(adaptive_prompts) and all(
+        f"（{role_tone}）" in prompt and context_note in prompt
+        for prompt in adaptive_prompts
+    )
+    _check(checks, "adaptive_profile_contract", profile_contract_ok, True, passed=profile_contract_ok)
+    memory_text = expected["session"].get("context_memory_contains", "")
+    memory_contract_ok = bool(memory_text) and len(adaptive_prompts) >= 2 and memory_text in adaptive_prompts[-1]
+    _check(checks, "adaptive_context_memory", memory_contract_ok, True, passed=memory_contract_ok)
     source_lines_valid = all(
         line.source.start_line >= 1
         and line.source.end_line >= line.source.start_line
@@ -203,6 +224,8 @@ def _evaluate_llm_contract(case: dict[str, Any], checks: list[CheckResult]) -> N
     _check(checks, "source_anchor_warning", warning_found, True, passed=warning_found)
 
     _check(checks, "adaptive_engine", line_response.engine, expected["adaptive_engine"])
+    _check(checks, "adaptive_role_tone", line_response.role_tone, role_tone)
+    _check(checks, "adaptive_context_note", line_response.context_note, context_note)
     _check(
         checks,
         "adaptive_characters",
@@ -231,6 +254,8 @@ def _evaluate_llm_contract(case: dict[str, Any], checks: list[CheckResult]) -> N
         session_expected["transcript_kinds"],
     )
     _check(checks, "session_engine_counts", resumed_session.engine_counts, session_expected["engine_counts"])
+    _check(checks, "session_role_tone", resumed_session.role_tone, role_tone)
+    _check(checks, "session_context_note", resumed_session.context_note, context_note)
     _check(
         checks,
         "session_id_stable",

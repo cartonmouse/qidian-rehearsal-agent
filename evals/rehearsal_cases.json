@@ -207,6 +207,8 @@
     "scene_id": "scene-1",
     "character": "小林",
     "line_index": 0,
+    "role_tone": "restrained",
+    "context_note": "这一轮排练重点是把停顿留在句尾，不把犹豫解释成愤怒。",
     "mock": {
       "scenes": {
         "1": {
@@ -268,7 +270,8 @@
         "turn_count": 2,
         "transcript_kinds": ["partner", "actor", "partner", "partner", "feedback"],
         "engine_counts": {"llm": 2},
-        "partner_source_lines": [11, 15]
+        "partner_source_lines": [11, 15],
+        "context_memory_contains": "先别急着解释，把你的犹豫留在门外。"
       }
     }
   }
