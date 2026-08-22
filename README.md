@@ -87,7 +87,7 @@ Agent 评估集已经接入仓库：`evals/rehearsal_cases.json` 覆盖剧本解
 - 已完成：调度草案与自动排班共享根 Run，并在 Agent运行记录页展示关联运行链
 - 已完成：无共同档期时的分组/缩短/补档建议，以及导演人工覆盖排班
 - 已完成：批量排班确认、原子写入和共享资源冲突校验
-- 待继续：补充更多真实剧本样本，并继续完善排练室等外部资源的跨场次约束样本
+- 待继续：补充更多真实剧本样本，并把配乐、预算等外部资源纳入排练任务上下文
 
 ## 技术栈
 
@@ -134,8 +134,8 @@ Agent 评估集说明和面试讲解要点位于 [`docs/agent-evaluation.md`](do
 - `POST /api/rehearsal/scripts/{script_id}/schedule/draft`：生成排练调度草案；请求体可传 `{"default_minutes": 45, "preview": true}` 生成未确认预览
 - `GET /api/rehearsal/scripts/{script_id}/schedule`：读取最近一次调度草案
 - `POST /api/rehearsal/scripts/{script_id}/schedule/plan`：根据演员可用时间生成自动排班结果
-- `POST /api/rehearsal/scripts/{script_id}/schedule/override`：保存导演确认的单个人工覆盖时段，并保留审计轨迹
-- `POST /api/rehearsal/scripts/{script_id}/schedule/override-batch`：原子确认多个排班时段；任一任务无效、已人工确认或与共享演员/道具冲突时整批拒绝，不产生半成品
+- `POST /api/rehearsal/scripts/{script_id}/schedule/override`：保存导演确认的单个人工覆盖时段；可选 `room_name` 会触发排练室预约检查，并保留审计轨迹
+- `POST /api/rehearsal/scripts/{script_id}/schedule/override-batch`：原子确认多个排班时段；任一任务无效、已人工确认、排练室不可用或与共享演员/道具冲突时整批拒绝，不产生半成品
 - `POST /api/rehearsal/scripts/{script_id}/line-reading`：推进一轮角色对词；支持 `strict` 和 `adaptive` 模式
 - `GET /api/rehearsal/scripts/{script_id}/line-reading/sessions/{session_id}`：恢复当前用户的对词游标、transcript 和下一句原词
 - `POST /api/rehearsal/scripts/{script_id}/rag`：在当前剧本版本内检索证据并回答问题；支持 `rules`/`semantic` 检索和 `auto`/`rules`/`llm` 回答

@@ -346,6 +346,7 @@ def _evaluate_schedule(case: dict[str, Any], checks: list[CheckResult]) -> None:
             date=slot["date"],
             start=slot["start"],
             end=slot["end"],
+            room_name=slot.get("room_name"),
             note="eval batch confirmation",
         ) for task, slot in zip(planned.tasks, item_specs)]
         confirmed = agent.apply_manual_overrides(planned, overrides, agent_run_id="3" * 32)
@@ -359,6 +360,14 @@ def _evaluate_schedule(case: dict[str, Any], checks: list[CheckResult]) -> None:
         _check(checks, "batch_override_tool_name", batch_call.tool_name, "apply_manual_override_batch")
         _check(checks, "batch_override_atomic", batch_call.result.get("atomic"), True)
         _check(checks, "batch_override_count", batch_call.result.get("overridden_count"), batch_expected["count"])
+        if batch_expected.get("room_tool"):
+            room_calls = [call for call in confirmed.tool_calls if call.tool_name == "validate_room_booking"]
+            room_ok = bool(room_calls) and room_calls[-1].result == {
+                "status": "available",
+                "checked_count": sum(1 for item in overrides if item.room_name),
+                "conflict_count": 0,
+            }
+            _check(checks, "batch_override_room_tool", room_ok, True, passed=room_ok)
         repeat_message = batch_expected.get("repeat_error_contains")
         if repeat_message:
             try:

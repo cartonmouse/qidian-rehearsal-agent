@@ -930,7 +930,9 @@ def override_schedule(
             date=request.date,
             start=request.start,
             end=request.end,
+            room_name=request.room_name,
             note=request.note,
+            room_bookings=list_room_bookings(user_id=user_id),
             agent_run_id=run_id,
             parent_run_id=draft.agent_run_id,
             root_run_id=draft.root_run_id or draft.agent_run_id or run_id,
@@ -979,6 +981,7 @@ def override_schedule_batch(
         updated = RehearsalScheduleAgent().apply_manual_overrides(
             draft,
             request.overrides,
+            room_bookings=list_room_bookings(user_id=user_id),
             agent_run_id=run_id,
             parent_run_id=draft.agent_run_id,
             root_run_id=draft.root_run_id or draft.agent_run_id or run_id,

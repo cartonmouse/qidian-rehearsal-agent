@@ -311,6 +311,7 @@ export interface ScheduleManualOverride {
   date: string;
   start: string;
   end: string;
+  room_name: string | null;
   note: string;
   created_at: string;
 }
@@ -795,7 +796,7 @@ export async function planSchedule(
 
 export async function overrideSchedule(
   scriptId: string,
-  payload: { task_id: string; date: string; start: string; end: string; note?: string },
+  payload: { task_id: string; date: string; start: string; end: string; room_name?: string; note?: string },
 ): Promise<ScheduleDraft> {
   const response = await authFetch(`/api/rehearsal/scripts/${encodeURIComponent(scriptId)}/schedule/override`, {
     method: "POST",
@@ -808,7 +809,7 @@ export async function overrideSchedule(
 
 export async function confirmScheduleBatch(
   scriptId: string,
-  overrides: Array<{ task_id: string; date: string; start: string; end: string; note?: string }>,
+  overrides: Array<{ task_id: string; date: string; start: string; end: string; room_name?: string; note?: string }>,
 ): Promise<ScheduleBatchOverrideResponse> {
   const response = await authFetch(`/api/rehearsal/scripts/${encodeURIComponent(scriptId)}/schedule/override-batch`, {
     method: "POST",

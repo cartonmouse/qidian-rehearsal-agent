@@ -67,6 +67,7 @@ type ScheduleOverridePayload = {
   date: string;
   start: string;
   end: string;
+  room_name?: string;
   note: string;
 };
 
@@ -81,6 +82,7 @@ export default function ActorSchedule() {
   const [saving, setSaving] = useState(false);
   const [planning, setPlanning] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [rehearsalRoom, setRehearsalRoom] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const availabilityFileRef = useRef<HTMLInputElement>(null);
@@ -263,6 +265,7 @@ export default function ActorSchedule() {
         date: task.scheduled_date as string,
         start: task.scheduled_start as string,
         end: task.scheduled_end as string,
+        room_name: rehearsalRoom.trim() || undefined,
         note: "导演批量确认自动排班时段",
       }));
     if (overrides.length === 0) {
@@ -454,6 +457,8 @@ export default function ActorSchedule() {
                 onPlan={() => void autoPlan()}
                 onOverride={applyScheduleOverride}
                 onBatchConfirm={() => void confirmScheduledBatch()}
+                roomName={rehearsalRoom}
+                onRoomNameChange={setRehearsalRoom}
               />
             )}
           </CardContent>
@@ -546,6 +551,8 @@ function ScheduleOverview({
   onPlan,
   onOverride,
   onBatchConfirm,
+  roomName,
+  onRoomNameChange,
 }: {
   schedule: ScheduleDraft;
   selectedScript: ScriptSummary;
@@ -556,6 +563,8 @@ function ScheduleOverview({
   onPlan: () => void;
   onOverride: (payload: ScheduleOverridePayload) => Promise<void>;
   onBatchConfirm: () => void;
+  roomName: string;
+  onRoomNameChange: (value: string) => void;
 }) {
   const parallelCount = new Set(schedule.tasks.map((task) => task.parallel_group)).size;
   return (
@@ -608,6 +617,20 @@ function ScheduleOverview({
         <Metric label="待处理" value={unassignedCount} tone="orange" />
       </div>
 
+      <div className="flex flex-col gap-2 rounded-xl border border-border bg-background/35 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="text-xs font-medium text-text">批量确认排练室（可选）</div>
+          <div className="mt-1 text-[11px] leading-5 text-dim">填写后，调度 Agent 会在确认前检查既有预约和本批次内的房间重叠。</div>
+        </div>
+        <input
+          value={roomName}
+          onChange={(event) => onRoomNameChange(event.target.value)}
+          placeholder="例如：排练室 A"
+          className="h-9 w-full rounded-lg border border-border bg-input px-2.5 text-xs text-text placeholder:text-dim sm:max-w-[220px]"
+          aria-label="批量确认排练室"
+        />
+      </div>
+
       <div className="grid gap-3 md:grid-cols-2">
         {schedule.tasks.map((task) => <TaskCard key={task.task_id} task={task} onOverride={onOverride} />)}
       </div>
@@ -624,6 +647,7 @@ function TaskCard({ task, onOverride }: { task: ScheduleTask; onOverride: (paylo
   const [date, setDate] = useState(task.scheduled_date || "");
   const [start, setStart] = useState(task.scheduled_start || "");
   const [end, setEnd] = useState(task.scheduled_end || "");
+  const [roomName, setRoomName] = useState(task.manual_override?.room_name || "");
   const [note, setNote] = useState(task.manual_override?.note || "");
   const [saving, setSaving] = useState(false);
 
@@ -631,6 +655,7 @@ function TaskCard({ task, onOverride }: { task: ScheduleTask; onOverride: (paylo
     setDate(task.scheduled_date || "");
     setStart(task.scheduled_start || "");
     setEnd(task.scheduled_end || "");
+    setRoomName(task.manual_override?.room_name || "");
     setNote(task.manual_override?.note || "");
     setEditing(true);
   }
@@ -639,7 +664,7 @@ function TaskCard({ task, onOverride }: { task: ScheduleTask; onOverride: (paylo
     if (!date || !start || !end) return;
     setSaving(true);
     try {
-      await onOverride({ task_id: task.task_id, date, start, end, note });
+      await onOverride({ task_id: task.task_id, date, start, end, room_name: roomName.trim() || undefined, note });
       setEditing(false);
     } catch {
       // The parent renders the server error and keeps this form open for correction.
@@ -665,6 +690,7 @@ function TaskCard({ task, onOverride }: { task: ScheduleTask; onOverride: (paylo
       ) : task.status === "overridden" ? (
         <div className="mt-2 rounded-lg bg-primary/8 px-2 py-1.5 text-xs leading-5 text-primary">
           人工覆盖：{task.scheduled_date} {task.scheduled_start} 至 {task.scheduled_end}
+          {task.manual_override?.room_name && <div className="text-[11px] text-primary/75">排练室：{task.manual_override.room_name}</div>}
           <div className="text-[11px] text-primary/75">{task.manual_override?.note || "导演已确认该时段"}</div>
         </div>
       ) : task.status === "unassigned" ? (
@@ -717,6 +743,7 @@ function TaskCard({ task, onOverride }: { task: ScheduleTask; onOverride: (paylo
             <label className="text-[10px] text-dim">开始<input type="time" value={start} onChange={(event) => setStart(event.target.value)} className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-text" /></label>
             <label className="text-[10px] text-dim">结束<input type="time" value={end} onChange={(event) => setEnd(event.target.value)} className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-text" /></label>
           </div>
+          <input value={roomName} onChange={(event) => setRoomName(event.target.value)} placeholder="排练室（可选，例如：排练室 A）" className="mt-2 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-text placeholder:text-dim" />
           <input value={note} onChange={(event) => setNote(event.target.value)} placeholder="覆盖原因（可选）" className="mt-2 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-text placeholder:text-dim" />
           <div className="mt-2 flex justify-end gap-2">
             <Button type="button" variant="ghost" size="sm" onClick={() => setEditing(false)} disabled={saving}>取消</Button>

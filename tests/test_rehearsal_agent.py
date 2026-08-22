@@ -230,6 +230,55 @@ def test_schedule_agent_keeps_manual_override_distinct_from_availability_match()
     assert overridden.tool_calls[-1].tool_name == "apply_manual_override"
 
 
+def test_schedule_agent_checks_room_booking_before_manual_confirmation():
+    analysis = ScriptAnalysisAgent().run(
+        title="排练室约束",
+        version_label="v1",
+        script_text="第一场\n小林：我们开始。\n导演：好。",
+    ).model_copy(update={"review_status": "confirmed"})
+    agent = RehearsalScheduleAgent()
+    draft = agent.run(analysis)
+    booking = RoomBooking(
+        booking_id="room-booking",
+        room_name="排练室 A",
+        date="2026-08-26",
+        start="19:00",
+        end="20:00",
+        purpose="其他剧组排练",
+    )
+
+    try:
+        agent.apply_manual_override(
+            draft,
+            task_id=draft.tasks[0].task_id,
+            date="2026-08-26",
+            start="19:00",
+            end="20:00",
+            room_name="排练室 A",
+            room_bookings=[booking],
+        )
+    except ValueError as exc:
+        assert "已有预约" in str(exc)
+    else:
+        raise AssertionError("a booked rehearsal room must reject manual confirmation")
+
+    available = agent.apply_manual_override(
+        draft,
+        task_id=draft.tasks[0].task_id,
+        date="2026-08-26",
+        start="19:00",
+        end="20:00",
+        room_name="排练室 B",
+        room_bookings=[booking],
+    )
+    assert available.tasks[0].manual_override is not None
+    assert available.tasks[0].manual_override.room_name == "排练室 B"
+    assert [call.tool_name for call in available.tool_calls[-2:]] == [
+        "validate_room_booking",
+        "apply_manual_override",
+    ]
+
+
 def test_schedule_agent_batch_override_is_atomic_and_exposes_contract():
     analysis = ScriptAnalysisAgent().run(
         title="批量确认",
@@ -264,6 +313,20 @@ def test_schedule_agent_batch_override_is_atomic_and_exposes_contract():
         "overridden_count": 2,
         "atomic": True,
     }
+
+    room_conflict_overrides = [item.model_copy(update={
+        "date": "2026-08-27",
+        "start": "19:00",
+        "end": "20:00",
+        "room_name": "排练室 A",
+    }) for item in overrides]
+    try:
+        agent.apply_manual_overrides(planned, room_conflict_overrides)
+    except ValueError as exc:
+        assert "批量确认存在排练室冲突" in str(exc)
+    else:
+        raise AssertionError("overlapping rooms must reject an atomic batch")
+    assert [task.status for task in planned.tasks] == ["scheduled", "scheduled"]
 
     try:
         agent.apply_manual_overrides(confirmed, overrides)

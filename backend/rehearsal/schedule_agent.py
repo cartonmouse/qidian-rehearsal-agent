@@ -14,7 +14,9 @@ from backend.rehearsal.models import (
     ScheduleTask,
     ScheduleToolCall,
     ScriptAnalysis,
+    RoomBooking,
 )
+from backend.rehearsal.resource_agent import room_booking_conflicts
 
 
 def _unique(values: list[str]) -> list[str]:
@@ -314,7 +316,9 @@ class RehearsalScheduleAgent:
         date: str,
         start: str,
         end: str,
+        room_name: str | None = None,
         note: str = "",
+        room_bookings: list[RoomBooking] | None = None,
         agent_run_id: str | None = None,
         parent_run_id: str | None = None,
         root_run_id: str | None = None,
@@ -331,10 +335,21 @@ class RehearsalScheduleAgent:
         if duration < task.estimated_minutes:
             raise ValueError(f"人工覆盖时长不能少于预计时长 {task.estimated_minutes} 分钟")
 
+        room_request = ScheduleOverrideRequest(
+            task_id=task_id,
+            date=date,
+            start=start,
+            end=end,
+            room_name=room_name,
+            note=note,
+        )
+        room_slots = self._validate_room_bookings([room_request], room_bookings or [])
+
         override = ScheduleManualOverride(
             date=date,
             start=start,
             end=end,
+            room_name=room_request.room_name,
             note=note.strip() or "导演确认后人工覆盖排班",
             created_at=datetime.now(timezone.utc).isoformat(),
         )
@@ -351,6 +366,20 @@ class RehearsalScheduleAgent:
         resolved_parent_run_id = parent_run_id if parent_run_id is not None else draft.agent_run_id
         resolved_root_run_id = root_run_id or draft.root_run_id or draft.agent_run_id or agent_run_id
         tool_calls = list(draft.tool_calls)
+        if room_slots:
+            self._record_tool_call(
+                tool_calls,
+                tool_name="validate_room_booking",
+                phase="override",
+                arguments={
+                    "room_name": room_slots[0].room_name,
+                    "date": room_slots[0].date,
+                    "start": room_slots[0].start,
+                    "end": room_slots[0].end,
+                },
+                result={"status": "available", "checked_count": len(room_slots), "conflict_count": 0},
+                summary=f"确认排练室“{room_slots[0].room_name}”时段可用。",
+            )
         self._record_tool_call(
             tool_calls,
             tool_name="apply_manual_override",
@@ -360,6 +389,7 @@ class RehearsalScheduleAgent:
                 "date": date,
                 "start": start,
                 "end": end,
+                "room_name": override.room_name,
                 "note": override.note,
             },
             result={"status": "overridden", "duration_minutes": duration},
@@ -379,6 +409,7 @@ class RehearsalScheduleAgent:
         draft: ScheduleDraft,
         overrides: list[ScheduleOverrideRequest],
         *,
+        room_bookings: list[RoomBooking] | None = None,
         agent_run_id: str | None = None,
         parent_run_id: str | None = None,
         root_run_id: str | None = None,
@@ -442,12 +473,18 @@ class RehearsalScheduleAgent:
                         f"批量确认与已有排班冲突：第 {task.scene_number} 场与第 {other_task.scene_number} 场共享{labels}"
                     )
 
+        room_slots = self._validate_room_bookings(
+            [item for _, item, _, _ in validated],
+            room_bookings or [],
+        )
+
         now = datetime.now(timezone.utc).isoformat()
         overrides_by_id = {
             item.task_id: (item, ScheduleManualOverride(
                 date=item.date,
                 start=item.start,
                 end=item.end,
+                room_name=item.room_name,
                 note=item.note.strip() or "导演批量确认排班",
                 created_at=now,
             ))
@@ -473,6 +510,25 @@ class RehearsalScheduleAgent:
         resolved_parent_run_id = parent_run_id if parent_run_id is not None else draft.agent_run_id
         resolved_root_run_id = root_run_id or draft.root_run_id or draft.agent_run_id or agent_run_id
         tool_calls = list(draft.tool_calls)
+        if room_slots:
+            self._record_tool_call(
+                tool_calls,
+                tool_name="validate_room_booking",
+                phase="override",
+                arguments={
+                    "room_slots": [
+                        {
+                            "room_name": item.room_name,
+                            "date": item.date,
+                            "start": item.start,
+                            "end": item.end,
+                        }
+                        for item in room_slots
+                    ],
+                },
+                result={"status": "available", "checked_count": len(room_slots), "conflict_count": 0},
+                summary=f"确认 {len(room_slots)} 个排练室时段均可用。",
+            )
         self._record_tool_call(
             tool_calls,
             tool_name="apply_manual_override_batch",
@@ -480,6 +536,7 @@ class RehearsalScheduleAgent:
             arguments={
                 "task_ids": selected_ids,
                 "override_count": len(selected_ids),
+                "room_names": sorted({item.room_name for item in room_slots if item.room_name}),
             },
             result={
                 "status": "overridden",
@@ -504,6 +561,45 @@ class RehearsalScheduleAgent:
             *(f"演员:{actor}" for actor in task.required_characters),
             *(f"道具:{prop}" for prop in task.props),
         }
+
+    @staticmethod
+    def _validate_room_bookings(
+        overrides: list[ScheduleOverrideRequest],
+        existing: list[RoomBooking],
+    ) -> list[ScheduleOverrideRequest]:
+        room_overrides = [item for item in overrides if item.room_name]
+        candidates = [
+            (
+                item,
+                RoomBooking(
+                    booking_id=f"schedule-room-{item.task_id}",
+                    room_name=item.room_name or "",
+                    date=item.date,
+                    start=item.start,
+                    end=item.end,
+                ),
+            )
+            for item in room_overrides
+        ]
+        for item, candidate in candidates:
+            conflict = next(
+                (booking for booking in existing if room_booking_conflicts(candidate, booking)),
+                None,
+            )
+            if conflict is not None:
+                raise ValueError(
+                    f"排练室“{candidate.room_name}”在 {candidate.date} "
+                    f"{candidate.start}-{candidate.end} 已有预约（{conflict.start}-{conflict.end}）"
+                )
+
+        for index, (item, candidate) in enumerate(candidates):
+            for other_item, other_candidate in candidates[index + 1:]:
+                if room_booking_conflicts(candidate, other_candidate):
+                    raise ValueError(
+                        f"批量确认存在排练室冲突：任务 {item.task_id} 与 {other_item.task_id} "
+                        f"占用“{candidate.room_name}”的重叠时段"
+                    )
+        return room_overrides
 
     @staticmethod
     def _record_tool_call(

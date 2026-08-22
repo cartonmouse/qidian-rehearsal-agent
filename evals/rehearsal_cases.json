@@ -136,10 +136,11 @@
       "second_task_reason_contains": "共享资源",
       "batch_override": {
         "items": [
-          {"date": "2026-08-26", "start": "19:00", "end": "19:45"},
-          {"date": "2026-08-27", "start": "19:00", "end": "19:45"}
+          {"date": "2026-08-26", "start": "19:00", "end": "19:45", "room_name": "排练室 A"},
+          {"date": "2026-08-27", "start": "19:00", "end": "19:45", "room_name": "排练室 A"}
         ],
         "count": 2,
+        "room_tool": true,
         "repeat_error_contains": "批量重复提交被拒绝"
       }
     }

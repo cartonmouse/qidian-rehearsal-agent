@@ -187,6 +187,7 @@ class ScheduleOverrideRequest(BaseModel):
     date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
     start: str = Field(pattern=r"^\d{2}:\d{2}$")
     end: str = Field(pattern=r"^\d{2}:\d{2}$")
+    room_name: str | None = Field(default=None, max_length=200)
     note: str = Field(default="", max_length=500)
 
     @field_validator("date")
@@ -205,6 +206,12 @@ class ScheduleOverrideRequest(BaseModel):
         if hour > 23 or minute > 59:
             raise ValueError("时间必须是有效的 HH:MM")
         return value
+
+    @field_validator("room_name")
+    @classmethod
+    def normalize_room_name(cls, value: str | None) -> str | None:
+        normalized = value.strip() if value is not None else None
+        return normalized or None
 
     @model_validator(mode="after")
     def validate_interval(self):
@@ -1073,6 +1080,7 @@ class ScheduleManualOverride(BaseModel):
     date: str
     start: str
     end: str
+    room_name: str | None = None
     note: str = ""
     created_at: str
 
