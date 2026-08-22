@@ -343,11 +343,13 @@ export interface ScheduleResourceContext {
   music_cues: MusicTimelineNote[];
   budget_items: BudgetLineItem[];
   invoices: InvoiceRecord[];
+  costume_inventory: ResourceInventoryItem[];
   estimated_total: number;
   actual_total: number;
   invoice_total: number;
   verified_invoice_total: number;
   unlinked_invoice_count: number;
+  costume_issue_count: number;
   warnings: string[];
 }
 

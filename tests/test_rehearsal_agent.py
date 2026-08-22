@@ -558,6 +558,21 @@ def test_schedule_agent_captures_music_and_budget_context():
             budget_item_id="missing-budget-item",
             status="pending",
         )],
+        inventory=[ResourceInventoryItem(
+            resource_id="costume-maintenance",
+            category="costume",
+            name="灰色外套",
+            quantity=1,
+            status="maintenance",
+            location="服装柜",
+        ), ResourceInventoryItem(
+            resource_id="costume-zero",
+            category="costume",
+            name="红色围巾",
+            quantity=0,
+            status="available",
+            location="服装柜",
+        )],
     )
 
     assert draft.resource_context is not None
@@ -569,8 +584,12 @@ def test_schedule_agent_captures_music_and_budget_context():
     assert draft.resource_context.invoice_total == 80
     assert draft.resource_context.verified_invoice_total == 0
     assert draft.resource_context.unlinked_invoice_count == 1
+    assert len(draft.resource_context.costume_inventory) == 2
+    assert draft.resource_context.costume_issue_count == 2
     assert "超出预算" in draft.resource_context.warnings[0]
     assert any("未关联预算项目" in warning for warning in draft.resource_context.warnings)
+    assert any("灰色外套" in warning for warning in draft.resource_context.warnings)
+    assert any("红色围巾" in warning and "数量为 0" in warning for warning in draft.resource_context.warnings)
     resource_calls = [call for call in draft.tool_calls if call.tool_name == "inspect_rehearsal_resources"]
     assert len(resource_calls) == 1
     assert resource_calls[0].result == {
@@ -581,7 +600,9 @@ def test_schedule_agent_captures_music_and_budget_context():
         "invoice_total": 80,
         "verified_invoice_total": 0,
         "unlinked_invoice_count": 1,
-        "warning_count": 3,
+        "costume_inventory_count": 2,
+        "costume_issue_count": 2,
+        "warning_count": 4,
     }
 
 

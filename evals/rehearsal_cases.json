@@ -136,6 +136,9 @@
     "invoices": [
       {"supplier": "奇点文化", "invoice_date": "2026-08-25", "category": "music", "amount": 80, "budget_item_id": "missing-budget-item", "status": "pending", "note": "待关联预算"}
     ],
+    "inventory": [
+      {"resource_id": "costume-maintenance", "category": "costume", "name": "灰色外套", "quantity": 1, "status": "maintenance", "location": "服装柜", "notes": "袖口待修"}
+    ],
     "expected": {
       "task_count": 2,
       "scheduled_count": 2,
@@ -144,16 +147,19 @@
         "music_count": 1,
         "budget_count": 1,
         "invoice_count": 1,
+        "costume_count": 1,
         "estimated_total": 100.0,
         "actual_total": 120.0,
         "invoice_total": 80.0,
         "verified_invoice_total": 0.0,
         "unlinked_invoice_count": 1,
+        "costume_issue_count": 1,
         "warning_contains": "未关联预算项目",
-        "warning_count": 3
+        "costume_warning_contains": "灰色外套",
+        "warning_count": 4
       },
       "tool_result_keys_by_name": {
-        "inspect_rehearsal_resources": ["music_cue_count", "budget_item_count", "invoice_count", "budget_variance", "invoice_total", "verified_invoice_total", "unlinked_invoice_count", "warning_count"]
+        "inspect_rehearsal_resources": ["music_cue_count", "budget_item_count", "invoice_count", "costume_inventory_count", "costume_issue_count", "budget_variance", "invoice_total", "verified_invoice_total", "unlinked_invoice_count", "warning_count"]
       },
       "parallel_groups": [1, 2],
       "first_task_end_equals_second_start": true,

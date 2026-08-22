@@ -19,6 +19,7 @@ from backend.rehearsal.models import (
     ScheduleTask,
     ScheduleToolCall,
     ScriptAnalysis,
+    ResourceInventoryItem,
     RoomBooking,
 )
 from backend.rehearsal.resource_agent import room_booking_conflicts
@@ -53,6 +54,7 @@ class RehearsalScheduleAgent:
         music_notes: list[MusicTimelineNote] | None = None,
         budget_items: list[BudgetLineItem] | None = None,
         invoices: list[InvoiceRecord] | None = None,
+        inventory: list[ResourceInventoryItem] | None = None,
     ) -> ScheduleDraft:
         if analysis.review_status == "pending" and not preview:
             raise ValueError("剧本尚未完成人工确认，不能生成排练调度")
@@ -60,7 +62,7 @@ class RehearsalScheduleAgent:
         groups: list[set[str]] = []
         tasks: list[ScheduleTask] = []
         tool_calls: list[ScheduleToolCall] = []
-        resource_context = self._build_resource_context(music_notes, budget_items, invoices)
+        resource_context = self._build_resource_context(music_notes, budget_items, invoices, inventory)
         self._record_tool_call(
             tool_calls,
             tool_name="inspect_script",
@@ -165,6 +167,7 @@ class RehearsalScheduleAgent:
                     "music_note_count": len(resource_context.music_cues),
                     "budget_item_count": len(resource_context.budget_items),
                     "invoice_count": len(resource_context.invoices),
+                    "costume_inventory_count": len(resource_context.costume_inventory),
                     "estimated_total": resource_context.estimated_total,
                     "actual_total": resource_context.actual_total,
                     "invoice_total": resource_context.invoice_total,
@@ -174,6 +177,8 @@ class RehearsalScheduleAgent:
                     "music_cue_count": len(resource_context.music_cues),
                     "budget_item_count": len(resource_context.budget_items),
                     "invoice_count": len(resource_context.invoices),
+                    "costume_inventory_count": len(resource_context.costume_inventory),
+                    "costume_issue_count": resource_context.costume_issue_count,
                     "budget_variance": round(
                         resource_context.actual_total - resource_context.estimated_total,
                         2,
@@ -186,7 +191,8 @@ class RehearsalScheduleAgent:
                 summary=(
                     f"读取 {len(resource_context.music_cues)} 个配乐提示点和 "
                     f"{len(resource_context.budget_items)} 个预算项目、"
-                    f"{len(resource_context.invoices)} 张发票，供排练任务复核。"
+                    f"{len(resource_context.invoices)} 张发票、"
+                    f"{len(resource_context.costume_inventory)} 条服装库存，供排练任务复核。"
                 ),
             )
         self._record_tool_call(
@@ -216,11 +222,17 @@ class RehearsalScheduleAgent:
         music_notes: list[MusicTimelineNote] | None,
         budget_items: list[BudgetLineItem] | None,
         invoices: list[InvoiceRecord] | None,
+        inventory: list[ResourceInventoryItem] | None,
     ) -> ScheduleResourceContext | None:
         music_cues = list(music_notes or [])
         items = list(budget_items or [])
         invoice_records = list(invoices or [])
-        if not music_cues and not items and not invoice_records:
+        costumes = [item for item in inventory or [] if item.category == "costume"]
+        costume_issues = [
+            item for item in costumes
+            if item.status != "available" or item.quantity <= 0
+        ]
+        if not music_cues and not items and not invoice_records and not costumes:
             return None
 
         finance = ResourceFinanceAgent().summarize(items, invoice_records)
@@ -237,16 +249,26 @@ class RehearsalScheduleAgent:
             invoice.budget_item_id not in valid_budget_ids
             for invoice in accepted_invoices
         )
+        warnings = list(finance.warnings)
+        if costume_issues:
+            status_labels = {"maintenance": "维修中", "missing": "缺失", "available": "数量为 0"}
+            labels = "、".join(
+                f"{item.name}（{status_labels.get(item.status, item.status)}）"
+                for item in costume_issues
+            )
+            warnings.append(f"服装库存存在不可直接使用项：{labels}，请人工确认。")
         return ScheduleResourceContext(
             music_cues=music_cues,
             budget_items=items,
             invoices=invoice_records,
+            costume_inventory=costumes,
             estimated_total=finance.estimated_total,
             actual_total=finance.actual_total,
             invoice_total=finance.invoice_total,
             verified_invoice_total=finance.verified_invoice_total,
             unlinked_invoice_count=unlinked_invoice_count,
-            warnings=list(finance.warnings),
+            costume_issue_count=len(costume_issues),
+            warnings=warnings,
         )
 
     def assign(

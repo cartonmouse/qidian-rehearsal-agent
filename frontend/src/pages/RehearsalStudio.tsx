@@ -715,9 +715,9 @@ export default function RehearsalStudio() {
                           <div className="rounded-xl border border-border bg-background/35 px-3 py-2.5 text-[11px] leading-5 text-dim">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <span className="font-medium text-text">资源上下文快照</span>
-                              <span>配乐 {schedule.resource_context.music_cues.length} 个提示点 · 预算 {schedule.resource_context.budget_items.length} 项 · 发票 {schedule.resource_context.invoices.length} 张</span>
+                              <span>配乐 {schedule.resource_context.music_cues.length} 个提示点 · 预算 {schedule.resource_context.budget_items.length} 项 · 发票 {schedule.resource_context.invoices.length} 张 · 服装 {schedule.resource_context.costume_inventory.length} 条</span>
                             </div>
-                            <div className="mt-1">预计 ¥{schedule.resource_context.estimated_total.toFixed(2)} · 实际 ¥{schedule.resource_context.actual_total.toFixed(2)} · 发票 ¥{schedule.resource_context.invoice_total.toFixed(2)}（已核验 ¥{schedule.resource_context.verified_invoice_total.toFixed(2)}）· 生成草案时读取，资源变更后请重新生成。</div>
+                            <div className="mt-1">预计 ¥{schedule.resource_context.estimated_total.toFixed(2)} · 实际 ¥{schedule.resource_context.actual_total.toFixed(2)} · 发票 ¥{schedule.resource_context.invoice_total.toFixed(2)}（已核验 ¥{schedule.resource_context.verified_invoice_total.toFixed(2)}）· 服装待处理 {schedule.resource_context.costume_issue_count} 项 · 生成草案时读取，资源变更后请重新生成。</div>
                             {schedule.resource_context.warnings.map((warning) => <div key={warning} className="mt-1 rounded-md bg-red/8 px-2 py-1 text-red">{warning}</div>)}
                           </div>
                         )}

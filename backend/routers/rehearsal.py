@@ -398,13 +398,15 @@ def _schedule_trace(draft: ScheduleDraft, *, planned: bool) -> list[AgentStep]:
             summary=(
                 f"读取 {len(draft.resource_context.music_cues)} 个配乐提示点、"
                 f"{len(draft.resource_context.budget_items)} 个预算项目、"
-                f"{len(draft.resource_context.invoices)} 张发票；"
+                f"{len(draft.resource_context.invoices)} 张发票、"
+                f"{len(draft.resource_context.costume_inventory)} 条服装库存；"
                 + ("发现预算超支风险，等待人工确认。" if draft.resource_context.warnings else "未发现预算超支提示。")
             ),
             output_count=(
                 len(draft.resource_context.music_cues)
                 + len(draft.resource_context.budget_items)
                 + len(draft.resource_context.invoices)
+                + len(draft.resource_context.costume_inventory)
             ),
         ))
     if planned:
@@ -819,6 +821,7 @@ def create_schedule_draft(
             music_notes=get_music_notes(user_id=user_id),
             budget_items=get_budget_items(user_id=user_id),
             invoices=get_invoices(user_id=user_id),
+            inventory=get_inventory(user_id=user_id),
         )
     except ValueError as exc:
         raise HTTPException(409, str(exc))
@@ -877,6 +880,7 @@ def plan_schedule(
                 music_notes=get_music_notes(user_id=user_id),
                 budget_items=get_budget_items(user_id=user_id),
                 invoices=get_invoices(user_id=user_id),
+                inventory=get_inventory(user_id=user_id),
             )
             save_schedule(draft, user_id=user_id)
             record_agent_run(

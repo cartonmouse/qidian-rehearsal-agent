@@ -628,6 +628,7 @@ function ScheduleOverview({
               <span className="rounded-full bg-teal/10 px-2 py-1 text-teal">配乐 {schedule.resource_context.music_cues.length} 个提示点</span>
               <span className="rounded-full bg-orange/10 px-2 py-1 text-orange">预算 {schedule.resource_context.budget_items.length} 项</span>
               <span className="rounded-full bg-primary/10 px-2 py-1 text-primary">发票 {schedule.resource_context.invoices.length} 张</span>
+              <span className={cn("rounded-full px-2 py-1", schedule.resource_context.costume_issue_count > 0 ? "bg-red/10 text-red" : "bg-teal/10 text-teal")}>服装 {schedule.resource_context.costume_inventory.length} 条{schedule.resource_context.costume_issue_count > 0 ? ` · ${schedule.resource_context.costume_issue_count} 项待处理` : ""}</span>
             </div>
           </div>
           <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
@@ -637,8 +638,8 @@ function ScheduleOverview({
             <div className="rounded-lg bg-background/45 px-2.5 py-2 text-[11px] text-dim">发票总额 <span className="font-mono text-text">¥{schedule.resource_context.invoice_total.toFixed(2)}</span></div>
             <div className="rounded-lg bg-background/45 px-2.5 py-2 text-[11px] text-dim">已核验 <span className="font-mono text-teal">¥{schedule.resource_context.verified_invoice_total.toFixed(2)}</span></div>
           </div>
-          {(schedule.resource_context.music_cues.length > 0 || schedule.resource_context.budget_items.length > 0 || schedule.resource_context.invoices.length > 0) && (
-            <div className="mt-3 grid gap-2 text-[11px] leading-5 text-dim md:grid-cols-3">
+          {(schedule.resource_context.music_cues.length > 0 || schedule.resource_context.budget_items.length > 0 || schedule.resource_context.invoices.length > 0 || schedule.resource_context.costume_inventory.length > 0) && (
+            <div className="mt-3 grid gap-2 text-[11px] leading-5 text-dim md:grid-cols-4">
               <div>
                 <div className="font-medium text-text">配乐提示</div>
                 <div>{schedule.resource_context.music_cues.slice(0, 4).map((cue) => `${cue.track_name}${cue.scene_id ? ` · ${cue.scene_id}` : ""}`).join("；") || "无"}</div>
@@ -649,7 +650,11 @@ function ScheduleOverview({
               </div>
               <div>
                 <div className="font-medium text-text">发票状态</div>
-                <div>{schedule.resource_context.invoices.slice(0, 4).map((invoice) => `${invoice.supplier} ¥${invoice.amount.toFixed(2)} · ${invoice.status}`).join("；") || "无"}</div>
+                <div>{schedule.resource_context.invoices.slice(0, 4).map((invoice) => `${invoice.supplier} ¥${invoice.amount.toFixed(2)} · ${invoice.status}`).join("；") || "无"}{schedule.resource_context.unlinked_invoice_count > 0 && <span className="text-orange"> · 未关联 {schedule.resource_context.unlinked_invoice_count} 张</span>}</div>
+              </div>
+              <div>
+                <div className="font-medium text-text">服装库存</div>
+                <div>{schedule.resource_context.costume_inventory.slice(0, 4).map((item) => `${item.name} · ${item.status}${item.quantity > 0 ? ` · ${item.quantity} 件` : ""}`).join("；") || "无"}</div>
               </div>
             </div>
           )}
