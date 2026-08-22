@@ -13,13 +13,38 @@ from typing import Literal
 from uuid import uuid4
 
 from backend.llm_provider import resolve_llm_config
-from backend.rehearsal.models import AgentStep, Character, Prop, ScriptAnalysis
+from backend.rehearsal.models import AgentStep, Character, CostumeRequirement, Prop, Scene, ScriptAnalysis
 from backend.rehearsal.llm_extractor import extract_scene_with_llm
 from backend.rehearsal.parser import extract_scene, normalize_lines, split_scene_blocks
 
 
 logger = logging.getLogger("uvicorn")
 AnalysisMode = Literal["auto", "rules", "llm"]
+
+
+def summarize_costume_requirements(scenes: list[Scene]) -> list[CostumeRequirement]:
+    """Index explicit scene costume labels and retain their source line evidence."""
+    requirements: dict[str, CostumeRequirement] = {}
+    for scene in scenes:
+        for name in scene.costumes:
+            item = requirements.setdefault(name, CostumeRequirement(name=name))
+            if scene.scene_id not in item.scene_ids:
+                item.scene_ids.append(scene.scene_id)
+            mention_count = 0
+            source_lines: list[int] = []
+            for line in scene.lines:
+                if name in line.text:
+                    mention_count += line.text.count(name)
+                    source_lines.append(line.source.start_line)
+            for direction in scene.stage_directions:
+                if name in direction.text:
+                    mention_count += direction.text.count(name)
+                    source_lines.append(direction.source_line)
+            item.mention_count += mention_count or 1
+            item.source_lines.extend(source_lines)
+    for item in requirements.values():
+        item.source_lines = sorted(set(item.source_lines))
+    return list(requirements.values())
 
 
 class ScriptAnalysisAgent:
@@ -132,16 +157,18 @@ class ScriptAnalysisAgent:
                 if scene.scene_id not in item.scene_ids:
                     item.scene_ids.append(scene.scene_id)
                 item.mention_count += 1
+        costumes = summarize_costume_requirements(scenes)
 
         analysis = ScriptAnalysis(
             script_id=script_id or uuid4().hex,
             title=title,
             version_label=version_label,
             analysis_mode=output_mode,
-            parser_version="0.2.0",
+            parser_version="0.3.0",
             scenes=scenes,
             characters=list(characters_by_name.values()),
             props=list(props_by_name.values()),
+            costumes=costumes,
             warnings=warnings,
             trace=trace,
             created_at=datetime.now(timezone.utc).isoformat(),

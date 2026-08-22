@@ -9,6 +9,7 @@ from backend.rehearsal.finance_agent import ResourceFinanceAgent
 from backend.rehearsal.models import (
     AvailabilitySlot,
     BudgetLineItem,
+    CostumeRequirement,
     InvoiceRecord,
     MusicTimelineNote,
     ScheduleAlternative,
@@ -32,6 +33,10 @@ def _unique(values: list[str]) -> list[str]:
         if normalized and normalized not in result:
             result.append(normalized)
     return result
+
+
+def _normalize_label(value: str) -> str:
+    return "".join(value.strip().casefold().split())
 
 
 class RehearsalScheduleAgent:
@@ -62,7 +67,13 @@ class RehearsalScheduleAgent:
         groups: list[set[str]] = []
         tasks: list[ScheduleTask] = []
         tool_calls: list[ScheduleToolCall] = []
-        resource_context = self._build_resource_context(music_notes, budget_items, invoices, inventory)
+        resource_context = self._build_resource_context(
+            music_notes,
+            budget_items,
+            invoices,
+            inventory,
+            analysis.costumes,
+        )
         self._record_tool_call(
             tool_calls,
             tool_name="inspect_script",
@@ -83,9 +94,11 @@ class RehearsalScheduleAgent:
         for scene in analysis.scenes:
             characters = _unique([*scene.characters, *(line.character for line in scene.lines)])
             props = _unique(scene.props)
+            costumes = _unique(scene.costumes)
             resources = {
                 *(f"character:{name}" for name in characters),
                 *(f"prop:{name}" for name in props),
+                *(f"costume:{name}" for name in costumes),
             }
             conflicting_groups = [
                 index
@@ -139,11 +152,12 @@ class RehearsalScheduleAgent:
                 result={
                     "required_characters": characters,
                     "props": props,
+                    "costumes": costumes,
                     "estimated_minutes": estimated_minutes,
                 },
                 summary=(
                     f"第 {scene.number} 场需要 {len(characters)} 名演员、"
-                    f"{len(props)} 件道具，预计 {estimated_minutes} 分钟。"
+                    f"{len(props)} 件道具、{len(costumes)} 项服装，预计 {estimated_minutes} 分钟。"
                 ),
             )
 
@@ -168,6 +182,7 @@ class RehearsalScheduleAgent:
                     "budget_item_count": len(resource_context.budget_items),
                     "invoice_count": len(resource_context.invoices),
                     "costume_inventory_count": len(resource_context.costume_inventory),
+                    "costume_requirement_count": len(resource_context.costume_requirements),
                     "estimated_total": resource_context.estimated_total,
                     "actual_total": resource_context.actual_total,
                     "invoice_total": resource_context.invoice_total,
@@ -179,6 +194,8 @@ class RehearsalScheduleAgent:
                     "invoice_count": len(resource_context.invoices),
                     "costume_inventory_count": len(resource_context.costume_inventory),
                     "costume_issue_count": resource_context.costume_issue_count,
+                    "costume_requirement_count": len(resource_context.costume_requirements),
+                    "unmatched_costume_requirement_count": resource_context.unmatched_costume_requirement_count,
                     "budget_variance": round(
                         resource_context.actual_total - resource_context.estimated_total,
                         2,
@@ -192,7 +209,8 @@ class RehearsalScheduleAgent:
                     f"读取 {len(resource_context.music_cues)} 个配乐提示点和 "
                     f"{len(resource_context.budget_items)} 个预算项目、"
                     f"{len(resource_context.invoices)} 张发票、"
-                    f"{len(resource_context.costume_inventory)} 条服装库存，供排练任务复核。"
+                    f"{len(resource_context.costume_inventory)} 条服装库存和 "
+                    f"{len(resource_context.costume_requirements)} 项剧本服装需求，供排练任务复核。"
                 ),
             )
         self._record_tool_call(
@@ -223,16 +241,18 @@ class RehearsalScheduleAgent:
         budget_items: list[BudgetLineItem] | None,
         invoices: list[InvoiceRecord] | None,
         inventory: list[ResourceInventoryItem] | None,
+        costume_requirements: list[CostumeRequirement] | None,
     ) -> ScheduleResourceContext | None:
         music_cues = list(music_notes or [])
         items = list(budget_items or [])
         invoice_records = list(invoices or [])
         costumes = [item for item in inventory or [] if item.category == "costume"]
+        requirements = list(costume_requirements or [])
         costume_issues = [
             item for item in costumes
             if item.status != "available" or item.quantity <= 0
         ]
-        if not music_cues and not items and not invoice_records and not costumes:
+        if not music_cues and not items and not invoice_records and not costumes and not requirements:
             return None
 
         finance = ResourceFinanceAgent().summarize(items, invoice_records)
@@ -257,17 +277,30 @@ class RehearsalScheduleAgent:
                 for item in costume_issues
             )
             warnings.append(f"服装库存存在不可直接使用项：{labels}，请人工确认。")
+        inventory_names = {_normalize_label(item.name) for item in costumes}
+        unmatched_requirements = [
+            requirement for requirement in requirements
+            if _normalize_label(requirement.name) not in inventory_names
+        ]
+        if unmatched_requirements:
+            labels = "、".join(
+                f"{requirement.name}（{', '.join(requirement.scene_ids)}）"
+                for requirement in unmatched_requirements
+            )
+            warnings.append(f"剧本识别出未匹配服装需求：{labels}，请补充库存或人工确认。")
         return ScheduleResourceContext(
             music_cues=music_cues,
             budget_items=items,
             invoices=invoice_records,
             costume_inventory=costumes,
+            costume_requirements=requirements,
             estimated_total=finance.estimated_total,
             actual_total=finance.actual_total,
             invoice_total=finance.invoice_total,
             verified_invoice_total=finance.verified_invoice_total,
             unlinked_invoice_count=unlinked_invoice_count,
             costume_issue_count=len(costume_issues),
+            unmatched_costume_requirement_count=len(unmatched_requirements),
             warnings=warnings,
         )
 

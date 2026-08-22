@@ -35,6 +35,7 @@ class LLMSceneDraft(BaseModel):
     title: str = Field(default="", max_length=200)
     characters: list[str] = Field(default_factory=list)
     props: list[str] = Field(default_factory=list)
+    costumes: list[str] = Field(default_factory=list)
     lines: list[LLMDialogueDraft] = Field(default_factory=list)
 
 
@@ -44,16 +45,18 @@ _SYSTEM_PROMPT = """你是话剧剧本结构化解析器。
   "title": "本场标题",
   "characters": ["角色名"],
   "props": ["道具名"],
+  "costumes": ["原文明确出现的服装或穿戴物"],
   "lines": [
     {"character": "角色名", "text": "台词原文", "start_line": 12, "end_line": 12}
   ]
 }
 
 要求：
-1. 只提取当前场次，不要补写原文不存在的角色、道具或台词。
+1. 只提取当前场次，不要补写原文不存在的角色、道具、服装或台词。
 2. 台词 text 必须尽量逐字复制输入中的原文；舞台提示不放入 lines。
 3. start_line/end_line 必须使用输入前缀中的真实行号。
-4. 无法确定的字段使用空数组或空字符串，不要猜测。
+4. costumes 只记录原文明确写出的服装或穿戴物，不要根据角色身份、年代或场景猜测。
+5. 无法确定的字段使用空数组或空字符串，不要猜测。
 """
 
 
@@ -158,12 +161,18 @@ def extract_scene_with_llm(block: SceneBlock, user_id: str) -> tuple[Scene, list
 
     characters = _unique([*draft.characters, *(line.character for line in lines)])
     props = _unique(draft.props)
+    source_text = "\n".join(text for _, text in block.lines)
+    model_costumes = _unique(draft.costumes)
+    costumes = [costume for costume in model_costumes if costume in source_text]
+    if len(costumes) != len(model_costumes):
+        warnings.append("LLM 返回了原文未明确出现的服装候选，已忽略并保留原文约束。")
     scene = Scene(
         scene_id=f"scene-{block.number}",
         number=block.number,
         title=draft.title.strip() or block.title,
         characters=characters,
         props=props,
+        costumes=costumes,
         lines=lines,
         source=SourceSpan(
             start_line=block.start_line,

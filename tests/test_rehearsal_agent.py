@@ -79,8 +79,9 @@ def test_llm_scene_extraction_anchors_model_text_to_source():
         last_attempts=1,
         invoke=lambda _messages: (
             '{"title":"短场","characters":["小林"],"props":["椅子"],'
+            '"costumes":["灰色外套","不存在的礼服"],'
             '"lines":[{"character":"小林","text":"请把椅子放这里。",'
-            '"start_line":2,"end_line":2}]}'
+            '"start_line":3,"end_line":3}]}'
         ),
     )
 
@@ -88,14 +89,16 @@ def test_llm_scene_extraction_anchors_model_text_to_source():
         result = ScriptAnalysisAgent().run(
             title="短场",
             version_label="mock",
-            script_text="第一场\n小林：请把椅子放到这里。",
+            script_text="第一场\n（小林穿灰色外套。）\n小林：请把椅子放到这里。",
             analysis_mode="llm",
             user_id="mock-user",
         )
 
     assert result.analysis_mode == "llm"
     assert result.scenes[0].lines[0].text == "请把椅子放到这里。"
+    assert result.scenes[0].costumes == ["灰色外套"]
     assert any("内容与原文不一致" in warning for warning in result.warnings)
+    assert any("原文未明确出现的服装候选" in warning for warning in result.warnings)
 
 
 def test_script_agent_keeps_source_line_for_human_review():
@@ -529,7 +532,7 @@ def test_schedule_agent_captures_music_and_budget_context():
     analysis = ScriptAnalysisAgent().run(
         title="资源上下文测试",
         version_label="v1",
-        script_text="第一场\n小林：音乐进。\n导演：开始。",
+        script_text="第一场\n（小林穿着灰色外套。）\n小林：音乐进。\n导演：开始。",
         script_id="resource-context",
         analysis_mode="rules",
     ).model_copy(update={"review_status": "confirmed"})
@@ -586,6 +589,8 @@ def test_schedule_agent_captures_music_and_budget_context():
     assert draft.resource_context.unlinked_invoice_count == 1
     assert len(draft.resource_context.costume_inventory) == 2
     assert draft.resource_context.costume_issue_count == 2
+    assert [item.name for item in draft.resource_context.costume_requirements] == ["灰色外套"]
+    assert draft.resource_context.unmatched_costume_requirement_count == 0
     assert "超出预算" in draft.resource_context.warnings[0]
     assert any("未关联预算项目" in warning for warning in draft.resource_context.warnings)
     assert any("灰色外套" in warning for warning in draft.resource_context.warnings)
@@ -602,8 +607,37 @@ def test_schedule_agent_captures_music_and_budget_context():
         "unlinked_invoice_count": 1,
         "costume_inventory_count": 2,
         "costume_issue_count": 2,
+        "costume_requirement_count": 1,
+        "unmatched_costume_requirement_count": 0,
         "warning_count": 4,
     }
+
+
+def test_schedule_agent_marks_unmatched_costume_requirement():
+    analysis = ScriptAnalysisAgent().run(
+        title="服装需求边界测试",
+        version_label="v1",
+        script_text="第一场\n（小林穿黑色西装。）\n小林：我准备好了。",
+        script_id="unmatched-costume",
+        analysis_mode="rules",
+    ).model_copy(update={"review_status": "confirmed"})
+
+    draft = RehearsalScheduleAgent().run(
+        analysis,
+        inventory=[ResourceInventoryItem(
+            resource_id="costume-other",
+            category="costume",
+            name="灰色外套",
+            quantity=1,
+            status="available",
+            location="服装柜",
+        )],
+    )
+
+    assert draft.resource_context is not None
+    assert draft.resource_context.costume_requirements[0].source_lines == [2]
+    assert draft.resource_context.unmatched_costume_requirement_count == 1
+    assert any("黑色西装" in warning and "未匹配服装需求" in warning for warning in draft.resource_context.warnings)
 
 
 def test_line_reading_follows_selected_role_and_source_lines():

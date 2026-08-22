@@ -622,13 +622,13 @@ function ScheduleOverview({
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
               <div className="text-xs font-medium text-text">调度 Agent 使用的资源快照</div>
-              <div className="mt-1 text-[11px] leading-5 text-dim">生成草案时读取配乐、预算与发票；资源发生变化后请重新生成草案。</div>
+              <div className="mt-1 text-[11px] leading-5 text-dim">生成草案时读取配乐、预算、发票、剧本服装需求与库存；资源发生变化后请重新生成草案。</div>
             </div>
             <div className="flex flex-wrap gap-1.5 text-[10px]">
               <span className="rounded-full bg-teal/10 px-2 py-1 text-teal">配乐 {schedule.resource_context.music_cues.length} 个提示点</span>
               <span className="rounded-full bg-orange/10 px-2 py-1 text-orange">预算 {schedule.resource_context.budget_items.length} 项</span>
               <span className="rounded-full bg-primary/10 px-2 py-1 text-primary">发票 {schedule.resource_context.invoices.length} 张</span>
-              <span className={cn("rounded-full px-2 py-1", schedule.resource_context.costume_issue_count > 0 ? "bg-red/10 text-red" : "bg-teal/10 text-teal")}>服装 {schedule.resource_context.costume_inventory.length} 条{schedule.resource_context.costume_issue_count > 0 ? ` · ${schedule.resource_context.costume_issue_count} 项待处理` : ""}</span>
+              <span className={cn("rounded-full px-2 py-1", schedule.resource_context.costume_issue_count > 0 || schedule.resource_context.unmatched_costume_requirement_count > 0 ? "bg-red/10 text-red" : "bg-teal/10 text-teal")}>服装需求 {schedule.resource_context.costume_requirements.length} 项 · 库存 {schedule.resource_context.costume_inventory.length} 条{schedule.resource_context.costume_issue_count > 0 ? ` · ${schedule.resource_context.costume_issue_count} 项待处理` : ""}</span>
             </div>
           </div>
           <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
@@ -638,8 +638,8 @@ function ScheduleOverview({
             <div className="rounded-lg bg-background/45 px-2.5 py-2 text-[11px] text-dim">发票总额 <span className="font-mono text-text">¥{schedule.resource_context.invoice_total.toFixed(2)}</span></div>
             <div className="rounded-lg bg-background/45 px-2.5 py-2 text-[11px] text-dim">已核验 <span className="font-mono text-teal">¥{schedule.resource_context.verified_invoice_total.toFixed(2)}</span></div>
           </div>
-          {(schedule.resource_context.music_cues.length > 0 || schedule.resource_context.budget_items.length > 0 || schedule.resource_context.invoices.length > 0 || schedule.resource_context.costume_inventory.length > 0) && (
-            <div className="mt-3 grid gap-2 text-[11px] leading-5 text-dim md:grid-cols-4">
+          {(schedule.resource_context.music_cues.length > 0 || schedule.resource_context.budget_items.length > 0 || schedule.resource_context.invoices.length > 0 || schedule.resource_context.costume_inventory.length > 0 || schedule.resource_context.costume_requirements.length > 0) && (
+            <div className="mt-3 grid gap-2 text-[11px] leading-5 text-dim md:grid-cols-5">
               <div>
                 <div className="font-medium text-text">配乐提示</div>
                 <div>{schedule.resource_context.music_cues.slice(0, 4).map((cue) => `${cue.track_name}${cue.scene_id ? ` · ${cue.scene_id}` : ""}`).join("；") || "无"}</div>
@@ -655,6 +655,10 @@ function ScheduleOverview({
               <div>
                 <div className="font-medium text-text">服装库存</div>
                 <div>{schedule.resource_context.costume_inventory.slice(0, 4).map((item) => `${item.name} · ${item.status}${item.quantity > 0 ? ` · ${item.quantity} 件` : ""}`).join("；") || "无"}</div>
+              </div>
+              <div>
+                <div className="font-medium text-text">剧本服装需求</div>
+                <div>{schedule.resource_context.costume_requirements.slice(0, 4).map((item) => `${item.name} · ${item.scene_ids.join("、")}`).join("；") || "无"}{schedule.resource_context.unmatched_costume_requirement_count > 0 && <span className="text-red"> · 未匹配 {schedule.resource_context.unmatched_costume_requirement_count} 项</span>}</div>
               </div>
             </div>
           )}
@@ -756,6 +760,10 @@ function TaskCard({ task, onOverride }: { task: ScheduleTask; onOverride: (paylo
       <div className="flex items-start gap-1.5 text-xs leading-5 text-dim">
         <Package size={13} className="mt-1 shrink-0 text-orange" />
         <span>{task.props.length > 0 ? task.props.join("、") : "无道具"}</span>
+      </div>
+      <div className="flex items-start gap-1.5 text-xs leading-5 text-dim">
+        <Package size={13} className="mt-1 shrink-0 text-primary" />
+        <span>{task.costumes.length > 0 ? task.costumes.join("、") : "无服装"}</span>
       </div>
       {task.status === "unassigned" && task.alternatives.length > 0 && (
         <div className="mt-3 rounded-lg border border-orange/20 bg-orange/6 p-2.5">

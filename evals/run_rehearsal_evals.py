@@ -113,6 +113,20 @@ def _evaluate_script_analysis(case: dict[str, Any], checks: list[CheckResult]) -
         sorted(actual_props & expected_props),
         sorted(expected_props),
     )
+    if "costume_names" in expected:
+        _check(
+            checks,
+            "costume_names",
+            sorted(costume.name for costume in analysis.costumes),
+            sorted(expected["costume_names"]),
+        )
+    if "costume_source_lines" in expected:
+        actual_costume_lines = sorted({
+            line
+            for costume in analysis.costumes
+            for line in costume.source_lines
+        })
+        _check(checks, "costume_source_lines", actual_costume_lines, sorted(expected["costume_source_lines"]))
     _check(checks, "trace_steps", [step.name for step in analysis.trace], expected.get("trace_steps"))
     source_lines_valid = all(
         scene.source.start_line >= 1
@@ -328,6 +342,20 @@ def _evaluate_schedule(case: dict[str, Any], checks: list[CheckResult]) -> None:
             _check(checks, "resource_budget_count", len(resource_context.budget_items), resource_expected["budget_count"])
             _check(checks, "resource_invoice_count", len(resource_context.invoices), resource_expected["invoice_count"])
             _check(checks, "resource_costume_count", len(resource_context.costume_inventory), resource_expected["costume_count"])
+            if "costume_requirement_count" in resource_expected:
+                _check(
+                    checks,
+                    "resource_costume_requirement_count",
+                    len(resource_context.costume_requirements),
+                    resource_expected["costume_requirement_count"],
+                )
+            if "unmatched_costume_requirement_count" in resource_expected:
+                _check(
+                    checks,
+                    "resource_unmatched_costume_requirement_count",
+                    resource_context.unmatched_costume_requirement_count,
+                    resource_expected["unmatched_costume_requirement_count"],
+                )
             _check(checks, "resource_estimated_total", resource_context.estimated_total, resource_expected["estimated_total"])
             _check(checks, "resource_actual_total", resource_context.actual_total, resource_expected["actual_total"])
             _check(checks, "resource_invoice_total", resource_context.invoice_total, resource_expected["invoice_total"])

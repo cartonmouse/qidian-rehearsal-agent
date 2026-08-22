@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pypdf import PdfReader
 
 from backend.auth import get_current_user
-from backend.rehearsal.agent import ScriptAnalysisAgent
+from backend.rehearsal.agent import ScriptAnalysisAgent, summarize_costume_requirements
 from backend.rehearsal.feedback_agent import RehearsalMirrorAgent
 from backend.rehearsal.finance_agent import ResourceFinanceAgent
 from backend.rehearsal.line_reading import LineReadingSessionAgent
@@ -393,13 +393,14 @@ def _schedule_trace(draft: ScheduleDraft, *, planned: bool) -> list[AgentStep]:
     ]
     if draft.resource_context is not None:
         trace.append(AgentStep(
-            name="读取配乐与预算上下文",
+            name="读取资源与服装需求上下文",
             status="repaired" if draft.resource_context.warnings else "completed",
             summary=(
                 f"读取 {len(draft.resource_context.music_cues)} 个配乐提示点、"
                 f"{len(draft.resource_context.budget_items)} 个预算项目、"
                 f"{len(draft.resource_context.invoices)} 张发票、"
-                f"{len(draft.resource_context.costume_inventory)} 条服装库存；"
+                f"{len(draft.resource_context.costume_inventory)} 条服装库存、"
+                f"{len(draft.resource_context.costume_requirements)} 项剧本服装需求；"
                 + ("发现预算超支风险，等待人工确认。" if draft.resource_context.warnings else "未发现预算超支提示。")
             ),
             output_count=(
@@ -407,6 +408,7 @@ def _schedule_trace(draft: ScheduleDraft, *, planned: bool) -> list[AgentStep]:
                 + len(draft.resource_context.budget_items)
                 + len(draft.resource_context.invoices)
                 + len(draft.resource_context.costume_inventory)
+                + len(draft.resource_context.costume_requirements)
             ),
         ))
     if planned:
@@ -458,6 +460,7 @@ def _rebuild_summaries(analysis: ScriptAnalysis) -> None:
             item.mention_count += 1
     analysis.characters = list(characters.values())
     analysis.props = list(props.values())
+    analysis.costumes = summarize_costume_requirements(analysis.scenes)
 
 
 def _analyze(
@@ -491,7 +494,8 @@ def _analyze(
         status=outcome_status(warnings=analysis.warnings),
         summary=(
             f"识别 {len(analysis.scenes)} 场、{len(analysis.characters)} 个角色、"
-            f"{len(analysis.props)} 个道具和 {sum(len(scene.lines) for scene in analysis.scenes)} 句台词。"
+            f"{len(analysis.props)} 个道具、{len(analysis.costumes)} 项服装需求和 "
+            f"{sum(len(scene.lines) for scene in analysis.scenes)} 句台词。"
         ),
         trace=analysis.trace,
         warnings=analysis.warnings,
@@ -786,6 +790,7 @@ def review_script(
         scene.title = patch.title.strip()
         scene.characters = _clean_labels(patch.characters)
         scene.props = _clean_labels(patch.props)
+        scene.costumes = _clean_labels(patch.costumes)
 
     _rebuild_summaries(analysis)
     analysis.review_status = request.review_status

@@ -129,7 +129,8 @@ function formatScheduleToolResult(call: ScheduleToolCall): string {
   if (call.tool_name === "extract_scene_requirements") {
     const characters = Array.isArray(result.required_characters) ? result.required_characters.length : 0;
     const props = Array.isArray(result.props) ? result.props.length : 0;
-    return `${characters} 名演员 · ${props} 件道具 · ${String(result.estimated_minutes || 0)} 分钟`;
+    const costumes = Array.isArray(result.costumes) ? result.costumes.length : 0;
+    return `${characters} 名演员 · ${props} 件道具 · ${costumes} 项服装 · ${String(result.estimated_minutes || 0)} 分钟`;
   }
   return result.review_gate === "passed" ? "确认门槛通过" : call.tool_name === "inspect_script" ? "仅允许预览" : "结构校验通过";
 }
@@ -229,6 +230,7 @@ export default function RehearsalStudio() {
         title: scene.title,
         characters: [...scene.characters],
         props: [...scene.props],
+        costumes: [...scene.costumes],
       }]),
     );
     setReviewDrafts(drafts);
@@ -550,7 +552,7 @@ export default function RehearsalStudio() {
                 </div>
                 <div className="mt-5 text-xl font-semibold">等待一次 Agent 运行</div>
                 <p className="mt-2 max-w-md text-sm leading-6 text-dim">
-                  点击页面上方或左侧的“运行解析 Agent”后，这里会展示场次、角色、台词、道具以及每一步 Agent trace。确认场次后还能继续生成调度任务和自动排班。
+                  点击页面上方或左侧的“运行解析 Agent”后，这里会展示场次、角色、台词、道具、服装需求以及每一步 Agent trace。确认场次后还能继续生成调度任务和自动排班。
                 </p>
               </div>
             ) : (
@@ -567,6 +569,7 @@ export default function RehearsalStudio() {
                     <span className="rounded-full bg-primary/10 px-2.5 py-1 text-primary">{analysis.scenes.length} 场</span>
                     <span className="rounded-full bg-teal/10 px-2.5 py-1 text-teal">{analysis.characters.length} 角色</span>
                     <span className="rounded-full bg-orange/10 px-2.5 py-1 text-orange">{analysis.props.length} 道具</span>
+                    <span className="rounded-full bg-primary/10 px-2.5 py-1 text-primary">{analysis.costumes.length} 服装需求</span>
                     {!reviewing ? (
                       <Button type="button" variant="outline" size="sm" onClick={startReview} disabled={busy}>
                         <Pencil size={14} /> 人工确认
@@ -608,12 +611,13 @@ export default function RehearsalStudio() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <SummaryBlock icon={Users} label="角色" values={analysis.characters.map((item) => `${item.name} · ${item.dialogue_count}句`)} />
                   <SummaryBlock icon={Package} label="道具" values={analysis.props.map((item) => `${item.name} · ${item.mention_count}次`)} />
+                  <SummaryBlock icon={Package} label="服装需求" values={analysis.costumes.map((item) => `${item.name} · 第${item.scene_ids.map((sceneId) => sceneId.replace("scene-", "")).join("、")}场 · L${item.source_lines.join("、") || "人工确认"}`)} />
                 </div>
 
                 {reviewing && (
                   <div className="rounded-2xl border border-primary/20 bg-primary/5 p-3.5">
                     <div className="text-sm font-semibold">人工确认节点</div>
-                    <div className="mt-1 text-xs leading-5 text-dim">可以修改每场的标题、角色和道具；台词原文与行号保持不变，作为后续调度的证据。</div>
+                    <div className="mt-1 text-xs leading-5 text-dim">可以修改每场的标题、角色、道具和服装；台词原文与行号保持不变，作为后续调度的证据。自动抽取的服装候选仍需导演确认。</div>
                     <Textarea
                       value={reviewNote}
                       onChange={(event) => setReviewNote(event.target.value)}
@@ -646,6 +650,11 @@ export default function RehearsalStudio() {
                             onChange={(event) => updateReviewDraft(scene.scene_id, { props: splitLabels(event.target.value) })}
                             placeholder="道具，用顿号或逗号分隔"
                           />
+                          <Input
+                            value={draft.costumes.join("、")}
+                            onChange={(event) => updateReviewDraft(scene.scene_id, { costumes: splitLabels(event.target.value) })}
+                            placeholder="服装，用顿号或逗号分隔"
+                          />
                         </div>
                       ) : (
                         <div className="flex flex-wrap items-start justify-between gap-2">
@@ -656,6 +665,7 @@ export default function RehearsalStudio() {
                           <div className="flex flex-wrap justify-end gap-1">
                             {scene.characters.map((character) => <span key={character} className="rounded-full bg-teal/10 px-2 py-0.5 text-[10px] text-teal">{character}</span>)}
                             {scene.props.map((prop) => <span key={prop} className="rounded-full bg-orange/10 px-2 py-0.5 text-[10px] text-orange">道具·{prop}</span>)}
+                            {scene.costumes.map((costume) => <span key={costume} className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary">服装·{costume}</span>)}
                           </div>
                         </div>
                       )}
@@ -691,7 +701,7 @@ export default function RehearsalStudio() {
                         <div className="mt-1 text-xs leading-5 text-dim">
                           {schedule?.is_preview
                             ? "这是基于当前解析结果的预览，允许你先检查任务和并行组；确认场次后再生成正式草案。"
-                            : "根据已确认的场次、演员和道具生成排练任务草案，并用资源冲突划分并行组。"}
+                            : "根据已确认的场次、演员、道具和服装需求生成排练任务草案，并用资源冲突划分并行组。"}
                         </div>
                       </div>
                       <Button type="button" variant="outline" size="sm" onClick={() => void generateSchedule(analysis.review_status === "pending")} disabled={scheduling || reviewing}>
@@ -715,9 +725,9 @@ export default function RehearsalStudio() {
                           <div className="rounded-xl border border-border bg-background/35 px-3 py-2.5 text-[11px] leading-5 text-dim">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <span className="font-medium text-text">资源上下文快照</span>
-                              <span>配乐 {schedule.resource_context.music_cues.length} 个提示点 · 预算 {schedule.resource_context.budget_items.length} 项 · 发票 {schedule.resource_context.invoices.length} 张 · 服装 {schedule.resource_context.costume_inventory.length} 条</span>
+                              <span>配乐 {schedule.resource_context.music_cues.length} 个提示点 · 预算 {schedule.resource_context.budget_items.length} 项 · 发票 {schedule.resource_context.invoices.length} 张 · 服装需求 {schedule.resource_context.costume_requirements.length} 项 · 库存 {schedule.resource_context.costume_inventory.length} 条</span>
                             </div>
-                            <div className="mt-1">预计 ¥{schedule.resource_context.estimated_total.toFixed(2)} · 实际 ¥{schedule.resource_context.actual_total.toFixed(2)} · 发票 ¥{schedule.resource_context.invoice_total.toFixed(2)}（已核验 ¥{schedule.resource_context.verified_invoice_total.toFixed(2)}）· 服装待处理 {schedule.resource_context.costume_issue_count} 项 · 生成草案时读取，资源变更后请重新生成。</div>
+                            <div className="mt-1">预计 ¥{schedule.resource_context.estimated_total.toFixed(2)} · 实际 ¥{schedule.resource_context.actual_total.toFixed(2)} · 发票 ¥{schedule.resource_context.invoice_total.toFixed(2)}（已核验 ¥{schedule.resource_context.verified_invoice_total.toFixed(2)}）· 服装库存待处理 {schedule.resource_context.costume_issue_count} 项 · 未匹配需求 {schedule.resource_context.unmatched_costume_requirement_count} 项 · 生成草案时读取，资源变更后请重新生成。</div>
                             {schedule.resource_context.warnings.map((warning) => <div key={warning} className="mt-1 rounded-md bg-red/8 px-2 py-1 text-red">{warning}</div>)}
                           </div>
                         )}
@@ -785,6 +795,9 @@ export default function RehearsalStudio() {
                               </div>
                               <div className="text-xs leading-5 text-dim">
                                 道具：{task.props.length > 0 ? task.props.join("、") : "无"}
+                              </div>
+                              <div className="text-xs leading-5 text-dim">
+                                服装：{task.costumes.length > 0 ? task.costumes.join("、") : "无"}
                               </div>
                             </div>
                           ))}

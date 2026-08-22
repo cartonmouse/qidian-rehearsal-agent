@@ -36,6 +36,7 @@ class Scene(BaseModel):
     title: str
     characters: list[str] = Field(default_factory=list)
     props: list[str] = Field(default_factory=list)
+    costumes: list[str] = Field(default_factory=list)
     lines: list[DialogueLine] = Field(default_factory=list)
     stage_directions: list[StageDirection] = Field(default_factory=list)
     source: SourceSpan
@@ -51,6 +52,15 @@ class Prop(BaseModel):
     name: str
     scene_ids: list[str] = Field(default_factory=list)
     mention_count: int = Field(default=0, ge=0)
+
+
+class CostumeRequirement(BaseModel):
+    """A source-backed clothing requirement extracted from one or more scenes."""
+
+    name: str
+    scene_ids: list[str] = Field(default_factory=list)
+    mention_count: int = Field(default=0, ge=0)
+    source_lines: list[int] = Field(default_factory=list)
 
 
 class AgentStep(BaseModel):
@@ -127,6 +137,7 @@ class SceneReviewPatch(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     characters: list[str] = Field(default_factory=list, max_length=100)
     props: list[str] = Field(default_factory=list, max_length=100)
+    costumes: list[str] = Field(default_factory=list, max_length=100)
 
 
 class ScriptReviewRequest(BaseModel):
@@ -1092,6 +1103,7 @@ class ScheduleTask(BaseModel):
     title: str
     required_characters: list[str] = Field(default_factory=list)
     props: list[str] = Field(default_factory=list)
+    costumes: list[str] = Field(default_factory=list)
     estimated_minutes: int = Field(ge=15, le=240)
     parallel_group: int = Field(ge=1)
     parallel_reason: str = ""
@@ -1112,12 +1124,14 @@ class ScheduleResourceContext(BaseModel):
     budget_items: list[BudgetLineItem] = Field(default_factory=list)
     invoices: list[InvoiceRecord] = Field(default_factory=list)
     costume_inventory: list[ResourceInventoryItem] = Field(default_factory=list)
+    costume_requirements: list[CostumeRequirement] = Field(default_factory=list)
     estimated_total: float = Field(default=0, ge=0)
     actual_total: float = Field(default=0, ge=0)
     invoice_total: float = Field(default=0, ge=0)
     verified_invoice_total: float = Field(default=0, ge=0)
     unlinked_invoice_count: int = Field(default=0, ge=0)
     costume_issue_count: int = Field(default=0, ge=0)
+    unmatched_costume_requirement_count: int = Field(default=0, ge=0)
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -1149,13 +1163,14 @@ class ScriptAnalysis(BaseModel):
     title: str
     version_label: str
     analysis_mode: Literal["deterministic", "llm", "hybrid"] = "deterministic"
-    parser_version: str = "0.2.0"
+    parser_version: str = "0.3.0"
     review_status: Literal["pending", "confirmed", "edited"] = "pending"
     reviewed_at: str | None = None
     review_note: str = ""
     scenes: list[Scene] = Field(default_factory=list)
     characters: list[Character] = Field(default_factory=list)
     props: list[Prop] = Field(default_factory=list)
+    costumes: list[CostumeRequirement] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     trace: list[AgentStep] = Field(default_factory=list)
     created_at: str

@@ -56,6 +56,33 @@ _PROP_LEXICON = (
     "书",
     "电脑",
 )
+_COSTUME_LEXICON = (
+    "灰色外套",
+    "黑色西装",
+    "白衬衫",
+    "红色围巾",
+    "长裙",
+    "制服",
+    "校服",
+    "礼服",
+    "戏服",
+    "雨衣",
+    "工装",
+    "睡衣",
+    "风衣",
+    "大衣",
+    "外套",
+    "西装",
+    "衬衫",
+    "围巾",
+    "裙子",
+    "夹克",
+    "帽子",
+    "眼镜",
+    "手套",
+    "靴子",
+    "鞋子",
+)
 _STAGE_CHARACTER_STOPWORDS = {
     "所有人",
     "大家",
@@ -174,10 +201,20 @@ def extract_props(text: str) -> list[str]:
     return [prop for prop in _PROP_LEXICON if prop in text]
 
 
+def extract_costumes(text: str) -> list[str]:
+    """Extract only explicit clothing terms and avoid generic nested labels."""
+    costumes: list[str] = []
+    for costume in _COSTUME_LEXICON:
+        if costume in text and not any(costume in existing for existing in costumes):
+            costumes.append(costume)
+    return costumes
+
+
 def extract_scene(block: SceneBlock) -> tuple[Scene, list[str]]:
     scene_id = f"scene-{block.number}"
     characters: list[str] = []
     props: list[str] = []
+    costumes: list[str] = []
     lines: list[DialogueLine] = []
     stage_directions: list[StageDirection] = []
     warnings: list[str] = []
@@ -191,6 +228,9 @@ def extract_scene(block: SceneBlock) -> tuple[Scene, list[str]]:
         for prop in found_props:
             if prop not in props:
                 props.append(prop)
+        for costume in extract_costumes(text):
+            if costume not in costumes:
+                costumes.append(costume)
 
         if is_stage_direction(text):
             for character in extract_stage_characters(text):
@@ -230,6 +270,7 @@ def extract_scene(block: SceneBlock) -> tuple[Scene, list[str]]:
         title=block.title,
         characters=characters,
         props=props,
+        costumes=costumes,
         lines=lines,
         stage_directions=stage_directions,
         source=SourceSpan(

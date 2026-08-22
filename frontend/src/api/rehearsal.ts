@@ -19,6 +19,7 @@ export interface Scene {
   title: string;
   characters: string[];
   props: string[];
+  costumes: string[];
   lines: DialogueLine[];
   stage_directions: StageDirection[];
   source: SourceSpan;
@@ -40,6 +41,13 @@ export interface PropSummary {
   name: string;
   scene_ids: string[];
   mention_count: number;
+}
+
+export interface CostumeRequirement {
+  name: string;
+  scene_ids: string[];
+  mention_count: number;
+  source_lines: number[];
 }
 
 export interface AgentStep {
@@ -112,6 +120,7 @@ export interface ScriptAnalysis {
   scenes: Scene[];
   characters: CharacterSummary[];
   props: PropSummary[];
+  costumes: CostumeRequirement[];
   warnings: string[];
   trace: AgentStep[];
   created_at: string;
@@ -271,6 +280,7 @@ export interface SceneReviewPatch {
   title: string;
   characters: string[];
   props: string[];
+  costumes: string[];
 }
 
 export interface ScheduleTask {
@@ -280,6 +290,7 @@ export interface ScheduleTask {
   title: string;
   required_characters: string[];
   props: string[];
+  costumes: string[];
   estimated_minutes: number;
   parallel_group: number;
   parallel_reason: string;
@@ -344,12 +355,14 @@ export interface ScheduleResourceContext {
   budget_items: BudgetLineItem[];
   invoices: InvoiceRecord[];
   costume_inventory: ResourceInventoryItem[];
+  costume_requirements: CostumeRequirement[];
   estimated_total: number;
   actual_total: number;
   invoice_total: number;
   verified_invoice_total: number;
   unlinked_invoice_count: number;
   costume_issue_count: number;
+  unmatched_costume_requirement_count: number;
   warnings: string[];
 }
 
