@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -65,6 +66,23 @@ def _unique(values: list[str]) -> list[str]:
     return result
 
 
+_SOURCE_SPEAKER_RE = re.compile(r"^\s*[^\s:：()（）\[\]【】]{1,24}\s*[：:]\s*(.+?)\s*$")
+
+
+def _source_dialogue_text(lines: list[str]) -> str:
+    """Return dialogue text from source lines, stripping only speaker prefixes."""
+    parts: list[str] = []
+    for raw_line in lines:
+        text = raw_line.strip()
+        match = _SOURCE_SPEAKER_RE.match(text)
+        parts.append(match.group(1).strip() if match else text)
+    return "\n".join(parts).strip()
+
+
+def _compact_text(value: str) -> str:
+    return "".join(value.split())
+
+
 def _load_json(text: str) -> dict[str, Any]:
     """Accept plain JSON and the fenced JSON some providers still return."""
     candidate = text.strip()
@@ -113,19 +131,25 @@ def extract_scene_with_llm(block: SceneBlock, user_id: str) -> tuple[Scene, list
         if item.start_line not in source_by_line or item.end_line not in source_by_line:
             warnings.append(f"LLM 第 {index} 条台词超出原文范围，已忽略。")
             continue
-        excerpt = "\n".join(
+        source_excerpt = "\n".join(
             source_by_line[line_number]
             for line_number in range(item.start_line, item.end_line + 1)
             if line_number in source_by_line
         ).strip()
+        source_dialogue = _source_dialogue_text(source_excerpt.splitlines())
+        if _compact_text(item.text) != _compact_text(source_dialogue):
+            warnings.append(f"LLM 第 {index} 条台词内容与原文不一致，已以原文为准。")
         lines.append(DialogueLine(
             line_id=f"scene-{block.number}-line-{len(lines) + 1}",
             character=item.character.strip(),
-            text=item.text.strip(),
+            # The model may locate a line but paraphrase it. The source remains
+            # authoritative so downstream RAG, line reading and review never
+            # turn an untrusted generation into a new script fact.
+            text=source_dialogue,
             source=SourceSpan(
                 start_line=item.start_line,
                 end_line=item.end_line,
-                excerpt=excerpt,
+                excerpt=source_excerpt,
             ),
         ))
 

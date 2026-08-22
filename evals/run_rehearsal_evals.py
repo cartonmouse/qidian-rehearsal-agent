@@ -9,11 +9,14 @@ feasibility, resource explanations, and source-backed RAG evidence.
 from __future__ import annotations
 
 import json
+from contextlib import ExitStack
 from dataclasses import asdict, dataclass
 from pathlib import Path
 import sys
 from typing import Any
+from unittest.mock import patch
 
+from evals.mock_llm import ContractMockLLM
 from backend.rehearsal.agent import ScriptAnalysisAgent
 from backend.rehearsal.models import (
     AvailabilitySlot,
@@ -24,7 +27,7 @@ from backend.rehearsal.models import (
 from backend.rehearsal.rag_agent import ScriptRagAgent
 from backend.rehearsal.resource_agent import ResourceAgent
 from backend.rehearsal.schedule_agent import RehearsalScheduleAgent
-from backend.rehearsal.line_reading import LineReadingSessionAgent
+from backend.rehearsal.line_reading import LineReadingAgent, LineReadingSessionAgent
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -114,6 +117,88 @@ def _evaluate_script_analysis(case: dict[str, Any], checks: list[CheckResult]) -
         for scene in analysis.scenes
     )
     _check(checks, "all_source_lines_valid", source_lines_valid, expected.get("all_source_lines_valid", True))
+
+
+def _evaluate_llm_contract(case: dict[str, Any], checks: list[CheckResult]) -> None:
+    """Exercise the optional provider path with deterministic fixture output."""
+    mock_config = case["mock"]
+    mock = ContractMockLLM(
+        scenes=mock_config["scenes"],
+        adaptive=mock_config["adaptive"],
+    )
+    with ExitStack() as stack:
+        stack.enter_context(patch(
+            "backend.rehearsal.llm_extractor.get_llm",
+            return_value=mock,
+        ))
+        stack.enter_context(patch(
+            "backend.rehearsal.line_reading.get_llm",
+            return_value=mock,
+        ))
+        analysis = _analysis(case)
+        line_response = LineReadingAgent().respond(
+            analysis,
+            LineReadingRequest(
+                scene_id=str(case["scene_id"]),
+                character=str(case["character"]),
+                mode="adaptive",
+                line_index=int(case.get("line_index", 0)),
+                user_text=str(case.get("user_text", "")),
+            ),
+        )
+
+    expected = case["expected"]
+    _check(checks, "analysis_mode", analysis.analysis_mode, expected["analysis_mode"])
+    _check(checks, "scene_numbers", [scene.number for scene in analysis.scenes], expected["scene_numbers"])
+    _check(
+        checks,
+        "character_names",
+        sorted(character.name for character in analysis.characters),
+        sorted(expected["character_names"]),
+    )
+    _check(
+        checks,
+        "props_include",
+        sorted({prop.name for prop in analysis.props} & set(expected["props_include"])),
+        sorted(expected["props_include"]),
+    )
+    _check(checks, "mock_call_count", len(mock.calls), expected["mock_call_count"])
+    source_lines_valid = all(
+        line.source.start_line >= 1
+        and line.source.end_line >= line.source.start_line
+        for scene in analysis.scenes
+        for line in scene.lines
+    )
+    _check(checks, "all_source_lines_valid", source_lines_valid, True)
+
+    anchored = expected["anchored_line"]
+    anchored_scene = next(scene for scene in analysis.scenes if scene.number == anchored["scene_number"])
+    anchored_line = next(
+        line for line in anchored_scene.lines if line.character == anchored["character"]
+    )
+    _check(checks, "source_anchor_text", anchored_line.text, anchored["text"])
+    warning_found = any(expected["warning_contains"] in warning for warning in analysis.warnings)
+    _check(checks, "source_anchor_warning", warning_found, True, passed=warning_found)
+
+    _check(checks, "adaptive_engine", line_response.engine, expected["adaptive_engine"])
+    _check(
+        checks,
+        "adaptive_characters",
+        [turn.character for turn in line_response.assistant_turns],
+        expected["adaptive_characters"],
+    )
+    _check(
+        checks,
+        "adaptive_source_lines",
+        [turn.source_line for turn in line_response.assistant_turns],
+        expected["adaptive_source_lines"],
+    )
+    _check(
+        checks,
+        "adaptive_texts",
+        [turn.text for turn in line_response.assistant_turns],
+        expected["adaptive_texts"],
+    )
 
 
 def _evaluate_schedule(case: dict[str, Any], checks: list[CheckResult]) -> None:
@@ -272,6 +357,8 @@ def _run_case(case: dict[str, Any]) -> CaseResult:
         kind = case["kind"]
         if kind == "script_analysis":
             _evaluate_script_analysis(case, checks)
+        elif kind == "llm_contract":
+            _evaluate_llm_contract(case, checks)
         elif kind == "schedule":
             _evaluate_schedule(case, checks)
         elif kind == "resource_check":

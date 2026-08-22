@@ -73,6 +73,30 @@ def test_script_agent_extracts_scenes_characters_lines_and_props():
     ]
 
 
+def test_llm_scene_extraction_anchors_model_text_to_source():
+    fake_llm = SimpleNamespace(
+        last_attempts=1,
+        invoke=lambda _messages: (
+            '{"title":"短场","characters":["小林"],"props":["椅子"],'
+            '"lines":[{"character":"小林","text":"请把椅子放这里。",'
+            '"start_line":2,"end_line":2}]}'
+        ),
+    )
+
+    with patch("backend.rehearsal.llm_extractor.get_llm", return_value=fake_llm):
+        result = ScriptAnalysisAgent().run(
+            title="短场",
+            version_label="mock",
+            script_text="第一场\n小林：请把椅子放到这里。",
+            analysis_mode="llm",
+            user_id="mock-user",
+        )
+
+    assert result.analysis_mode == "llm"
+    assert result.scenes[0].lines[0].text == "请把椅子放到这里。"
+    assert any("内容与原文不一致" in warning for warning in result.warnings)
+
+
 def test_script_agent_keeps_source_line_for_human_review():
     result = ScriptAnalysisAgent().run(
         title="短场",
@@ -1284,6 +1308,6 @@ def test_rehearsal_agent_eval_set_is_reproducible_without_provider_keys():
 
     report = evaluate_cases()
 
-    assert report["total"] == 8
+    assert report["total"] == 9
     assert report["failed"] == 0
     assert report["pass_rate"] == 100.0

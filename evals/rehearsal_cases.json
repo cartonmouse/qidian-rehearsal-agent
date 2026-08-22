@@ -178,5 +178,63 @@
       "session_id_stable": true,
       "source_lines_valid": true
     }
+  },
+  {
+    "id": "llm-contract-source-and-adaptive",
+    "kind": "llm_contract",
+    "title": "轨道之外",
+    "version_label": "eval-v1",
+    "script_path": "docs/examples/qidian-demo-script.md",
+    "analysis_mode": "llm",
+    "scene_id": "scene-1",
+    "character": "小林",
+    "line_index": 0,
+    "mock": {
+      "scenes": {
+        "1": {
+          "title": "排练室·傍晚",
+          "characters": ["导演", "小林", "许教授", "小周"],
+          "props": ["椅子", "手电筒", "信封", "纸条", "手机"],
+          "lines": [
+            {"character": "导演", "text": "所有人先不要急着走位，我们先确认第一场的节奏", "start_line": 7, "end_line": 7},
+            {"character": "小林", "text": "我总觉得这封信不是写给我的。", "start_line": 9, "end_line": 9},
+            {"character": "许教授", "text": "信封里只有一张纸条，但它改变了我们对这条轨道的理解。", "start_line": 11, "end_line": 11},
+            {"character": "小周", "text": "从灯光亮起到第一次停顿，应该给观众十二秒。", "start_line": 15, "end_line": 15}
+          ]
+        },
+        "2": {
+          "title": "天台·夜",
+          "characters": ["许教授", "小林"],
+          "props": ["椅子", "手电筒", "纸条"],
+          "lines": [
+            {"character": "许教授", "text": "如果所有人都在绕着同一个问题旋转，我们要不要换一个方向？", "start_line": 21, "end_line": 21},
+            {"character": "小林", "text": "我愿意试一次，但请把这张纸条留在这里。", "start_line": 23, "end_line": 23}
+          ]
+        }
+      },
+      "adaptive": {
+        "turns": [
+          {"character": "导演", "text": "先别急着解释，把你的犹豫留在门外。"}
+        ],
+        "note": "保持停顿，再进入下一句。"
+      }
+    },
+    "expected": {
+      "analysis_mode": "llm",
+      "scene_numbers": [1, 2],
+      "character_names": ["导演", "小林", "许教授", "小周"],
+      "props_include": ["椅子", "手电筒", "信封", "纸条", "手机"],
+      "mock_call_count": 3,
+      "anchored_line": {
+        "scene_number": 1,
+        "character": "导演",
+        "text": "所有人先不要急着走位，我们先确认第一场的节奏。"
+      },
+      "warning_contains": "内容与原文不一致",
+      "adaptive_engine": "llm",
+      "adaptive_characters": ["导演"],
+      "adaptive_source_lines": [7],
+      "adaptive_texts": ["先别急着解释，把你的犹豫留在门外。"]
+    }
   }
 ]
