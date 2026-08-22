@@ -17,6 +17,7 @@ from backend.rehearsal.models import (
     PromoCopyResponse,
     RehearsalFeedbackResponse,
     RehearsalLogResponse,
+    ResourceAuditRecord,
     ResourceInventoryItem,
     RoomBooking,
     ScheduleDraft,
@@ -372,6 +373,39 @@ def _resources_dir(user_id: str) -> Path:
     path = settings.user_data_dir(user_id) / "rehearsal" / "resources"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _resource_audit_path(user_id: str) -> Path:
+    return _resources_dir(user_id) / "audit.json"
+
+
+def save_resource_audit(record: ResourceAuditRecord, *, user_id: str) -> None:
+    path = _resource_audit_path(user_id)
+    existing = list_resource_audits(user_id=user_id, limit=200)
+    payload = [record, *existing[:199]]
+    path.write_text(
+        json.dumps([item.model_dump(mode="json") for item in payload], ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def list_resource_audits(*, user_id: str, limit: int = 50) -> list[ResourceAuditRecord]:
+    path = _resource_audit_path(user_id)
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return []
+    result: list[ResourceAuditRecord] = []
+    for item in payload:
+        if len(result) >= limit:
+            break
+        try:
+            result.append(ResourceAuditRecord.model_validate(item))
+        except (ValueError, TypeError):
+            continue
+    return result
 
 
 def _inventory_path(user_id: str) -> Path:

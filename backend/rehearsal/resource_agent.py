@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import re
 from collections import Counter, defaultdict
+from typing import Literal
+from uuid import uuid4
+
+from pydantic import BaseModel
 
 from backend.rehearsal.models import (
+    ResourceAuditChange,
+    ResourceAuditRecord,
     ResourceCheckResponse,
     ResourceInventoryItem,
     ResourceRequirement,
@@ -13,6 +20,50 @@ from backend.rehearsal.models import (
     RoomBookingRequest,
     ScriptAnalysis,
 )
+
+ResourceAuditType = Literal["inventory", "room", "music", "budget", "invoice"]
+ResourceAuditOperation = Literal["replace", "create", "delete"]
+
+_AUDIT_ID_FIELDS: dict[str, str] = {
+    "inventory": "resource_id",
+    "room": "booking_id",
+    "music": "note_id",
+    "budget": "budget_item_id",
+    "invoice": "invoice_id",
+}
+_AUDIT_LABEL_FIELDS: dict[str, str] = {
+    "inventory": "name",
+    "room": "room_name",
+    "music": "track_name",
+    "budget": "name",
+    "invoice": "supplier",
+}
+_AUDIT_FIELD_LABELS = {
+    "category": "类别",
+    "name": "名称",
+    "quantity": "数量",
+    "status": "状态",
+    "location": "存放位置",
+    "notes": "备注",
+    "room_name": "排练室",
+    "date": "日期",
+    "start": "开始时间",
+    "end": "结束时间",
+    "purpose": "用途",
+    "track_name": "配乐",
+    "scene_id": "场次",
+    "cue_type": "提示类型",
+    "start_seconds": "开始秒数",
+    "end_seconds": "结束秒数",
+    "note": "备注",
+    "estimated_amount": "预算金额",
+    "actual_amount": "实际金额",
+    "invoice_no": "发票号码",
+    "supplier": "供应商",
+    "invoice_date": "发票日期",
+    "amount": "发票金额",
+    "budget_item_id": "关联预算",
+}
 
 
 def _normalize_name(value: str) -> str:
@@ -138,3 +189,109 @@ class ResourceAgent:
             summary=summary,
             warnings=warnings,
         )
+
+
+class ResourceAuditAgent:
+    """Compare resource snapshots and explain exactly what changed."""
+
+    def compare(
+        self,
+        *,
+        resource_type: ResourceAuditType,
+        operation: ResourceAuditOperation,
+        before: list[BaseModel],
+        after: list[BaseModel],
+    ) -> ResourceAuditRecord | None:
+        id_field = _AUDIT_ID_FIELDS[resource_type]
+        before_by_id = self._index(before, id_field)
+        after_by_id = self._index(after, id_field)
+        changes: list[ResourceAuditChange] = []
+
+        for resource_id in sorted(set(before_by_id) | set(after_by_id)):
+            old_payload = before_by_id.get(resource_id)
+            new_payload = after_by_id.get(resource_id)
+            if old_payload is None and new_payload is not None:
+                label = self._label(resource_type, new_payload)
+                changes.append(ResourceAuditChange(
+                    change_type="created",
+                    resource_id=resource_id,
+                    label=label,
+                    changed_fields=self._field_labels(new_payload, id_field),
+                    summary=f"新增{label}",
+                ))
+                continue
+            if new_payload is None and old_payload is not None:
+                label = self._label(resource_type, old_payload)
+                changes.append(ResourceAuditChange(
+                    change_type="deleted",
+                    resource_id=resource_id,
+                    label=label,
+                    changed_fields=self._field_labels(old_payload, id_field),
+                    summary=f"删除{label}",
+                ))
+                continue
+            assert old_payload is not None and new_payload is not None
+            fields = [
+                key for key in sorted(set(old_payload) | set(new_payload))
+                if key != id_field and old_payload.get(key) != new_payload.get(key)
+            ]
+            if fields:
+                label = self._label(resource_type, new_payload)
+                field_labels = [self._field_label(field) for field in fields]
+                changes.append(ResourceAuditChange(
+                    change_type="updated",
+                    resource_id=resource_id,
+                    label=label,
+                    changed_fields=field_labels,
+                    summary=f"更新{label}：" + "、".join(field_labels),
+                ))
+
+        if not changes:
+            return None
+        counts = Counter(change.change_type for change in changes)
+        summary_parts = []
+        if counts["created"]:
+            summary_parts.append(f"新增 {counts['created']} 条")
+        if counts["updated"]:
+            summary_parts.append(f"修改 {counts['updated']} 条")
+        if counts["deleted"]:
+            summary_parts.append(f"删除 {counts['deleted']} 条")
+        resource_label = {
+            "inventory": "库存",
+            "room": "排练室预约",
+            "music": "配乐时间轴",
+            "budget": "预算",
+            "invoice": "发票",
+        }[resource_type]
+        return ResourceAuditRecord(
+            audit_id=uuid4().hex,
+            resource_type=resource_type,
+            operation=operation,
+            changed_count=len(changes),
+            changes=changes,
+            summary=f"{resource_label}变更：" + "、".join(summary_parts) + "。",
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+    @staticmethod
+    def _index(items: list[BaseModel], id_field: str) -> dict[str, dict]:
+        result: dict[str, dict] = {}
+        for item in items:
+            payload = item.model_dump(mode="json")
+            resource_id = payload.get(id_field)
+            if resource_id:
+                result[str(resource_id)] = payload
+        return result
+
+    @staticmethod
+    def _label(resource_type: ResourceAuditType, payload: dict) -> str:
+        field = _AUDIT_LABEL_FIELDS[resource_type]
+        return str(payload.get(field) or "未命名资源")
+
+    @staticmethod
+    def _field_label(field: str) -> str:
+        return _AUDIT_FIELD_LABELS.get(field, field)
+
+    @classmethod
+    def _field_labels(cls, payload: dict, id_field: str) -> list[str]:
+        return [cls._field_label(field) for field in sorted(payload) if field != id_field]

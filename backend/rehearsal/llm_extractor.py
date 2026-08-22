@@ -89,7 +89,8 @@ def _load_json(text: str) -> dict[str, Any]:
 def extract_scene_with_llm(block: SceneBlock, user_id: str) -> tuple[Scene, list[str]]:
     """Extract one scene and verify every returned line against source bounds."""
     numbered_source = "\n".join(f"{line_number}: {text}" for line_number, text in block.lines)
-    response = get_llm(user_id).invoke([
+    llm = get_llm(user_id)
+    response = llm.invoke([
         SystemMessage(_SYSTEM_PROMPT),
         HumanMessage(
             f"当前场次编号：{block.number}\n"
@@ -102,6 +103,8 @@ def extract_scene_with_llm(block: SceneBlock, user_id: str) -> tuple[Scene, list
 
     source_by_line = {line_number: text for line_number, text in block.lines}
     warnings: list[str] = []
+    if llm.last_attempts > 1:
+        warnings.append(f"LLM 请求在第 {llm.last_attempts} 次尝试后成功，已保留本次重试记录。")
     lines: list[DialogueLine] = []
     for index, item in enumerate(draft.lines, start=1):
         if item.start_line > item.end_line:

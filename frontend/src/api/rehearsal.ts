@@ -51,7 +51,7 @@ export interface AgentStep {
 
 export interface AgentRunRecord {
   run_id: string;
-  agent: "script-analysis" | "schedule-draft" | "schedule-plan" | "line-reading" | "script-rag";
+  agent: "script-analysis" | "schedule-draft" | "schedule-plan" | "line-reading" | "script-rag" | "resource-check";
   action: string;
   script_id: string | null;
   script_title: string;
@@ -62,6 +62,40 @@ export interface AgentRunRecord {
   warnings: string[];
   duration_ms: number;
   created_at: string;
+}
+
+export interface AgentRunMetricItem {
+  agent: string;
+  run_count: number;
+  completed_count: number;
+  fallback_count: number;
+  failed_count: number;
+  failure_rate: number;
+  fallback_rate: number;
+  average_duration_ms: number;
+}
+
+export interface AgentFailureStep {
+  name: string;
+  failed_count: number;
+  last_summary: string;
+}
+
+export interface AgentRunMetricsResponse {
+  window_days: number;
+  from_datetime: string;
+  to_datetime: string;
+  total_runs: number;
+  completed_runs: number;
+  fallback_runs: number;
+  failed_runs: number;
+  failure_rate: number;
+  fallback_rate: number;
+  average_duration_ms: number;
+  by_agent: AgentRunMetricItem[];
+  failed_steps: AgentFailureStep[];
+  note: string;
+  generated_at: string;
 }
 
 export interface ScriptAnalysis {
@@ -266,6 +300,24 @@ export interface ResourceInventoryItem {
   status: "available" | "maintenance" | "missing";
   location: string;
   notes: string;
+}
+
+export interface ResourceAuditChange {
+  change_type: "created" | "updated" | "deleted";
+  resource_id: string;
+  label: string;
+  changed_fields: string[];
+  summary: string;
+}
+
+export interface ResourceAuditRecord {
+  audit_id: string;
+  resource_type: "inventory" | "room" | "music" | "budget" | "invoice";
+  operation: "replace" | "create" | "delete";
+  changed_count: number;
+  changes: ResourceAuditChange[];
+  summary: string;
+  created_at: string;
 }
 
 export interface RoomBooking {
@@ -529,6 +581,12 @@ export async function getAgentRuns(limit = 50): Promise<AgentRunRecord[]> {
   return response.json();
 }
 
+export async function getAgentRunMetrics(windowDays = 30): Promise<AgentRunMetricsResponse> {
+  const response = await authFetch(`/api/rehearsal/agent-runs/metrics?window_days=${windowDays}`);
+  await ensureOk(response, "Agent 运行指标加载失败");
+  return response.json();
+}
+
 export async function getAgentRun(runId: string): Promise<AgentRunRecord> {
   const response = await authFetch(`/api/rehearsal/agent-runs/${encodeURIComponent(runId)}`);
   await ensureOk(response, "Agent 运行记录加载失败");
@@ -666,6 +724,12 @@ export async function saveResourceInventory(
     body: JSON.stringify({ items }),
   });
   await ensureOk(response, "资源库存保存失败");
+  return response.json();
+}
+
+export async function getResourceAudits(limit = 50): Promise<ResourceAuditRecord[]> {
+  const response = await authFetch(`/api/rehearsal/resources/audit?limit=${limit}`);
+  await ensureOk(response, "资源变更记录加载失败");
   return response.json();
 }
 

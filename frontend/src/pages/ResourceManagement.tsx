@@ -7,6 +7,7 @@ import {
   ClipboardCheck,
   DoorOpen,
   FileText,
+  History,
   Loader2,
   Plus,
   Save,
@@ -20,11 +21,13 @@ import {
   createRoomBooking,
   deleteRoomBooking,
   getResourceInventory,
+  getResourceAudits,
   getRoomBookings,
   getScript,
   getScripts,
   saveResourceInventory,
   type ResourceCheckResponse,
+  type ResourceAuditRecord,
   type ResourceInventoryItem,
   type RoomBooking,
   type ScriptAnalysis,
@@ -68,6 +71,7 @@ function today() {
 
 export default function ResourceManagement() {
   const [inventory, setInventory] = useState<ResourceInventoryItem[]>([]);
+  const [audits, setAudits] = useState<ResourceAuditRecord[]>([]);
   const [bookings, setBookings] = useState<RoomBooking[]>([]);
   const [scripts, setScripts] = useState<ScriptSummary[]>([]);
   const [selectedScriptId, setSelectedScriptId] = useState("");
@@ -96,10 +100,11 @@ export default function ResourceManagement() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    void Promise.all([getResourceInventory(), getRoomBookings(), getScripts()])
-      .then(([items, roomItems, scriptItems]) => {
+    void Promise.all([getResourceInventory(), getRoomBookings(), getScripts(), getResourceAudits(20)])
+      .then(([items, roomItems, scriptItems, auditItems]) => {
         if (cancelled) return;
         setInventory(items);
+        setAudits(auditItems);
         setBookings(roomItems);
         setScripts(scriptItems);
         setSelectedScriptId((current) => (
@@ -118,6 +123,14 @@ export default function ResourceManagement() {
       cancelled = true;
     };
   }, []);
+
+  async function refreshAudits() {
+    try {
+      setAudits(await getResourceAudits(20));
+    } catch {
+      // The resource write has already succeeded; the audit panel can refresh later.
+    }
+  }
 
   useEffect(() => {
     if (!selectedScriptId) {
@@ -175,6 +188,7 @@ export default function ResourceManagement() {
     try {
       const saved = await saveResourceInventory(inventory);
       setInventory(saved);
+      await refreshAudits();
       setMessage(`已保存 ${saved.length} 条库存记录。`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "资源库存保存失败");
@@ -193,6 +207,7 @@ export default function ResourceManagement() {
       setBookings((items) => [...items, booking].sort((a, b) => (
         `${a.date}${a.start}${a.room_name}`.localeCompare(`${b.date}${b.start}${b.room_name}`)
       )));
+      await refreshAudits();
       setMessage(`已预约 ${booking.room_name}：${booking.date} ${booking.start}-${booking.end}。`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "排练室预约失败");
@@ -206,6 +221,7 @@ export default function ResourceManagement() {
     try {
       await deleteRoomBooking(bookingId);
       setBookings((items) => items.filter((item) => item.booking_id !== bookingId));
+      await refreshAudits();
       setMessage("排练室预约已取消。");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "排练室预约删除失败");
@@ -299,6 +315,8 @@ export default function ResourceManagement() {
         }}
         onCheck={() => void runResourceCheck()}
       />
+
+      <ResourceAuditCard audits={audits} />
     </div>
   );
 }
@@ -614,6 +632,61 @@ function ResourceCheckResult({ result }: { result: ResourceCheckResponse }) {
         </div>
       )}
     </div>
+  );
+}
+
+const AUDIT_RESOURCE_LABELS: Record<ResourceAuditRecord["resource_type"], string> = {
+  inventory: "库存",
+  room: "排练室预约",
+  music: "配乐时间轴",
+  budget: "预算",
+  invoice: "发票",
+};
+
+const AUDIT_CHANGE_LABELS: Record<ResourceAuditRecord["changes"][number]["change_type"], string> = {
+  created: "新增",
+  updated: "修改",
+  deleted: "删除",
+};
+
+function ResourceAuditCard({ audits }: { audits: ResourceAuditRecord[] }) {
+  return (
+    <Card>
+      <CardContent className="p-4 md:p-5">
+        <div className="flex items-start justify-between gap-3 border-b border-border pb-4">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-text"><History size={16} className="text-primary" />资源变更记录</div>
+            <p className="mt-1 text-xs leading-5 text-dim">保留库存、排练室、配乐、预算和发票的最近变更，方便解释 Resource Agent 使用了哪一版人工确认数据。</p>
+          </div>
+          <span className="rounded-full border border-primary/20 bg-primary/8 px-2 py-1 text-[10px] text-primary">{audits.length} 条</span>
+        </div>
+
+        {audits.length === 0 ? (
+          <div className="mt-4 rounded-xl border border-dashed border-border bg-background/35 px-4 py-6 text-center text-sm text-dim">保存一次库存或资源信息后，这里会显示变更摘要。</div>
+        ) : (
+          <div className="mt-3 divide-y divide-border/70">
+            {audits.map((audit) => (
+              <div key={audit.audit_id} className="py-3 first:pt-0 last:pb-0">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-2 text-sm font-medium text-text">
+                    <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary">{AUDIT_RESOURCE_LABELS[audit.resource_type]}</span>
+                    {audit.summary}
+                  </div>
+                  <span className="text-[11px] text-dim">{new Date(audit.created_at).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {audit.changes.slice(0, 8).map((change) => (
+                    <span key={`${audit.audit_id}-${change.resource_id}`} className={cn("rounded-full px-2 py-1 text-[10px]", change.change_type === "created" ? "bg-green/10 text-green" : change.change_type === "deleted" ? "bg-red/10 text-red" : "bg-orange/10 text-orange")}>
+                      {AUDIT_CHANGE_LABELS[change.change_type]} {change.label}{change.changed_fields.length > 0 ? ` · ${change.changed_fields.join("、")}` : ""}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

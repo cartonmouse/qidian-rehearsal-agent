@@ -186,7 +186,8 @@ class LineReadingAgent:
             {"character": line.character, "text": line.text}
             for line in lines
         ]
-        response = get_llm(user_id).invoke([
+        llm = get_llm(user_id)
+        response = llm.invoke([
             SystemMessage(_ADAPTIVE_SYSTEM_PROMPT),
             HumanMessage(
                 f"练习者角色：{role}\n"
@@ -208,4 +209,8 @@ class LineReadingAgent:
                 text=item.text.strip(),
                 source_line=line.source.start_line,
             ))
-        return turns, draft.note.strip()
+        note = draft.note.strip()
+        if llm.last_attempts > 1:
+            retry_note = f"LLM 请求在第 {llm.last_attempts} 次尝试后成功。"
+            note = f"{note} {retry_note}".strip()
+        return turns, note[:500]

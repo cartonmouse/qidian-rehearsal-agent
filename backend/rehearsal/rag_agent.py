@@ -332,11 +332,14 @@ class ScriptRagAgent:
             }
             for item in evidence
         ]
-        response = get_llm(user_id).invoke([
+        llm = get_llm(user_id)
+        response = llm.invoke([
             SystemMessage(_RAG_SYSTEM_PROMPT),
             HumanMessage(json.dumps({"问题": question, "证据": context}, ensure_ascii=False)),
         ])
         draft = _RagDraft.model_validate(_load_json(response))
         if not any(item.evidence_id in draft.answer for item in evidence):
             raise ValueError("LLM answer omitted script evidence citation")
+        if llm.last_attempts > 1:
+            draft.note = f"{draft.note} LLM 请求在第 {llm.last_attempts} 次尝试后成功。".strip()[:500]
         return draft

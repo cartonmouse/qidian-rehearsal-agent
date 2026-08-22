@@ -22,8 +22,9 @@ from backend.rehearsal.metrics_agent import RehearsalMetricsAgent
 from backend.rehearsal.motto_agent import MottoAgent
 from backend.rehearsal.promo_agent import PromoCopyAgent
 from backend.rehearsal.rag_agent import ScriptRagAgent
-from backend.rehearsal.resource_agent import ResourceAgent, room_booking_conflicts
+from backend.rehearsal.resource_agent import ResourceAgent, ResourceAuditAgent, room_booking_conflicts
 from backend.rehearsal.run_log import outcome_status, record_agent_run
+from backend.rehearsal.run_metrics import AgentRunMetricsAgent
 from backend.rehearsal.schedule_agent import RehearsalScheduleAgent
 from backend.rehearsal.stage_agent import StageVisualizationAgent
 from backend.rehearsal.suggestion_agent import SuggestionInboxAgent
@@ -32,6 +33,7 @@ from backend.rehearsal.models import (
     AvailabilitySlot,
     AvailabilityUpdateRequest,
     AgentRunRecord,
+    AgentRunMetricsResponse,
     AgentStep,
     BudgetLineItem,
     BudgetUpdateRequest,
@@ -48,6 +50,7 @@ from backend.rehearsal.models import (
     RehearsalLogResponse,
     ResourceCheckRequest,
     ResourceCheckResponse,
+    ResourceAuditRecord,
     ResourceInventoryItem,
     ResourceInventoryUpdateRequest,
     ResourceFinanceSummary,
@@ -79,6 +82,7 @@ from backend.rehearsal.storage import (
     delete_schedule,
     get_availability,
     get_agent_run,
+    list_resource_audits,
     get_budget_items,
     get_feedback,
     get_inventory,
@@ -113,12 +117,24 @@ from backend.rehearsal.storage import (
     save_motto,
     delete_motto,
     save_promo_copy,
+    save_resource_audit,
 )
 
 
 router = APIRouter(prefix="/api/rehearsal", tags=["rehearsal"])
 _MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 _TEXT_EXTENSIONS = {".txt", ".md", ".markdown"}
+
+
+def _audit_resource_change(*, user_id: str, resource_type: str, operation: str, before: list, after: list) -> None:
+    record = ResourceAuditAgent().compare(
+        resource_type=resource_type,  # type: ignore[arg-type]
+        operation=operation,  # type: ignore[arg-type]
+        before=before,
+        after=after,
+    )
+    if record is not None:
+        save_resource_audit(record, user_id=user_id)
 
 
 @router.get("/resources/inventory", response_model=list[ResourceInventoryItem])
@@ -136,8 +152,25 @@ def write_resource_inventory(
     ids = [item.resource_id for item in request.items]
     if len(ids) != len(set(ids)):
         raise HTTPException(400, "资源记录 ID 不能重复")
+    before = get_inventory(user_id=user_id)
     save_inventory(request.items, user_id=user_id)
+    _audit_resource_change(
+        user_id=user_id,
+        resource_type="inventory",
+        operation="replace",
+        before=before,
+        after=request.items,
+    )
     return request.items
+
+
+@router.get("/resources/audit", response_model=list[ResourceAuditRecord])
+def read_resource_audits(
+    limit: int = Query(default=50, ge=1, le=200),
+    user_id: str = Depends(get_current_user),
+):
+    """Read recent user-scoped changes to rehearsal resources."""
+    return list_resource_audits(user_id=user_id, limit=limit)
 
 
 @router.get("/resources/rooms", response_model=list[RoomBooking])
@@ -160,17 +193,32 @@ def create_room_booking(
         )
     booking = RoomBooking(booking_id=uuid4().hex, **request.model_dump())
     save_room_booking(booking, user_id=user_id)
+    _audit_resource_change(
+        user_id=user_id,
+        resource_type="room",
+        operation="create",
+        before=bookings,
+        after=[*bookings, booking],
+    )
     return booking
 
 
 @router.delete("/resources/rooms/{booking_id}")
 def remove_room_booking(booking_id: str, user_id: str = Depends(get_current_user)):
+    before = list_room_bookings(user_id=user_id)
     try:
         removed = delete_room_booking(booking_id, user_id=user_id)
     except ValueError:
         raise HTTPException(400, "无效的预约 ID")
     if not removed:
         raise HTTPException(404, "排练室预约不存在")
+    _audit_resource_change(
+        user_id=user_id,
+        resource_type="room",
+        operation="delete",
+        before=before,
+        after=list_room_bookings(user_id=user_id),
+    )
     return {"deleted": True}
 
 
@@ -188,7 +236,15 @@ def write_music_timeline(
     ids = [note.note_id for note in request.notes]
     if len(ids) != len(set(ids)):
         raise HTTPException(400, "配乐时间轴笔记 ID 不能重复")
+    before = get_music_notes(user_id=user_id)
     save_music_notes(request.notes, user_id=user_id)
+    _audit_resource_change(
+        user_id=user_id,
+        resource_type="music",
+        operation="replace",
+        before=before,
+        after=request.notes,
+    )
     return request.notes
 
 
@@ -206,7 +262,15 @@ def write_budget_items(
     ids = [item.budget_item_id for item in request.items]
     if len(ids) != len(set(ids)):
         raise HTTPException(400, "预算项目 ID 不能重复")
+    before = get_budget_items(user_id=user_id)
     save_budget_items(request.items, user_id=user_id)
+    _audit_resource_change(
+        user_id=user_id,
+        resource_type="budget",
+        operation="replace",
+        before=before,
+        after=request.items,
+    )
     return request.items
 
 
@@ -224,7 +288,15 @@ def write_resource_invoices(
     ids = [invoice.invoice_id for invoice in request.invoices]
     if len(ids) != len(set(ids)):
         raise HTTPException(400, "发票 ID 不能重复")
+    before = get_invoices(user_id=user_id)
     save_invoices(request.invoices, user_id=user_id)
+    _audit_resource_change(
+        user_id=user_id,
+        resource_type="invoice",
+        operation="replace",
+        before=before,
+        after=request.invoices,
+    )
     return request.invoices
 
 
@@ -396,6 +468,18 @@ def read_agent_runs(
     return list_agent_runs(user_id=user_id, limit=limit)
 
 
+@router.get("/agent-runs/metrics", response_model=AgentRunMetricsResponse)
+def read_agent_run_metrics(
+    window_days: int = Query(default=30, ge=7, le=365),
+    user_id: str = Depends(get_current_user),
+):
+    """Summarize recent run status and failed trace steps for the current user."""
+    return AgentRunMetricsAgent().summarize(
+        list_agent_runs(user_id=user_id, limit=200),
+        window_days=window_days,
+    )
+
+
 @router.get("/agent-runs/{run_id}", response_model=AgentRunRecord)
 def read_agent_run(run_id: str, user_id: str = Depends(get_current_user)):
     try:
@@ -528,14 +612,48 @@ def check_script_resources(
         raise HTTPException(400, "无效的剧本 ID")
     if analysis is None:
         raise HTTPException(404, "剧本解析结果不存在")
+    started = perf_counter()
     try:
-        return ResourceAgent().check(
+        response = ResourceAgent().check(
             analysis,
             get_inventory(user_id=user_id),
             scene_id=request.scene_id,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc))
+    record_agent_run(
+        user_id=user_id,
+        agent="resource-check",
+        action="检查排练资源就绪状态",
+        script_id=analysis.script_id,
+        script_title=analysis.title,
+        mode="单场" if request.scene_id else "全剧本",
+        status=outcome_status(warnings=response.warnings),
+        summary=response.summary,
+        trace=[
+            AgentStep(
+                name="读取剧本道具需求",
+                status="completed",
+                summary=f"读取 {len(response.requirements)} 种待检查道具。",
+                output_count=len(response.requirements),
+            ),
+            AgentStep(
+                name="匹配库存状态",
+                status="repaired" if response.warnings else "completed",
+                summary=f"得到 {response.ready_count} 种已就绪、{response.missing_count} 种仍需处理的结果。",
+                output_count=len(response.requirements),
+            ),
+            AgentStep(
+                name="解释资源缺口",
+                status="completed",
+                summary=response.summary,
+                output_count=len(response.warnings),
+            ),
+        ],
+        warnings=response.warnings,
+        duration_ms=_elapsed_ms(started),
+    )
+    return response
 
 
 @router.post("/scripts/{script_id}/rag", response_model=ScriptRagResponse)

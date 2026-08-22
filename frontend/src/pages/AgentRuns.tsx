@@ -11,7 +11,7 @@ import {
   Workflow,
 } from "lucide-react";
 
-import { getAgentRuns, type AgentRunRecord, type AgentStep } from "@/api/rehearsal";
+import { getAgentRunMetrics, getAgentRuns, type AgentRunMetricsResponse, type AgentRunRecord, type AgentStep } from "@/api/rehearsal";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -24,6 +24,7 @@ const AGENT_LABELS: Record<AgentRunRecord["agent"], string> = {
   "schedule-plan": "自动排班 Agent",
   "line-reading": "对词 Agent",
   "script-rag": "剧本问答 Agent",
+  "resource-check": "资源检查 Agent",
 };
 
 const STATUS_LABELS: Record<AgentRunRecord["status"], string> = {
@@ -55,6 +56,7 @@ function formatTime(value: string) {
 
 export default function AgentRuns() {
   const [runs, setRuns] = useState<AgentRunRecord[]>([]);
+  const [metrics, setMetrics] = useState<AgentRunMetricsResponse | null>(null);
   const [selectedId, setSelectedId] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -63,8 +65,9 @@ export default function AgentRuns() {
     setLoading(true);
     setError("");
     try {
-      const items = await getAgentRuns(80);
+      const [items, summary] = await Promise.all([getAgentRuns(80), getAgentRunMetrics(30)]);
       setRuns(items);
+      setMetrics(summary);
       setSelectedId((current) => current && items.some((item) => item.run_id === current) ? current : items[0]?.run_id || "");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Agent 运行记录加载失败");
@@ -106,11 +109,12 @@ export default function AgentRuns() {
 
       {error && <div className="rounded-xl border border-red/25 bg-red/8 px-4 py-3 text-sm text-red">{error}</div>}
 
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-4">
         {[
-          ["已记录运行", runs.length, "本账号的 Agent 调用"],
-          ["发生过降级", fallbackCount, "仍保留可用结果"],
-          ["平均耗时", `${averageDuration} ms`, "不含页面加载"],
+          ["30 天运行", metrics?.total_runs ?? runs.length, "本账号的 Agent 调用"],
+          ["失败率", `${metrics?.failure_rate ?? 0}%`, "只统计 failed 状态"],
+          ["发生过降级", metrics?.fallback_runs ?? fallbackCount, "仍保留可用结果"],
+          ["平均耗时", `${metrics?.average_duration_ms ?? averageDuration} ms`, "不含页面加载"],
         ].map(([label, value, note]) => (
           <Card key={String(label)} className="border-border/80 bg-card/80">
             <CardContent className="p-4">
@@ -121,6 +125,8 @@ export default function AgentRuns() {
           </Card>
         ))}
       </div>
+
+      {metrics && <RunMetricsCard metrics={metrics} />}
 
       <div className="grid min-h-[520px] gap-4 lg:grid-cols-[minmax(300px,0.8fr)_minmax(0,1.4fr)]">
         <Card className="overflow-hidden border-border/80 bg-card/80">
@@ -220,6 +226,65 @@ export default function AgentRuns() {
           </CardContent>
         </Card>
       </div>
+    </div>
+  );
+}
+
+function RunMetricsCard({ metrics }: { metrics: AgentRunMetricsResponse }) {
+  return (
+    <Card className="border-border/80 bg-card/80">
+      <CardContent className="p-4 md:p-5">
+        <div className="flex flex-col gap-1 md:flex-row md:items-start md:justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-text"><Activity size={16} className="text-primary" />运行健康度</div>
+            <p className="mt-1 text-xs leading-5 text-dim">{metrics.note}</p>
+          </div>
+          <span className="text-[11px] text-dim">最近 {metrics.window_days} 天</span>
+        </div>
+
+        <div className="mt-4 grid gap-3 lg:grid-cols-[1.1fr_1.1fr_1.1fr_2fr]">
+          <HealthMetric label="完成" value={metrics.completed_runs} tone="text-emerald-300" />
+          <HealthMetric label="降级" value={metrics.fallback_runs} tone="text-amber-300" />
+          <HealthMetric label="失败" value={metrics.failed_runs} tone="text-red" />
+          <div className="rounded-xl bg-background/35 p-3">
+            <div className="text-xs text-dim">失败步骤 Top 8</div>
+            {metrics.failed_steps.length === 0 ? (
+              <div className="mt-2 text-xs text-emerald-300">当前窗口没有记录到 failed step。</div>
+            ) : (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {metrics.failed_steps.map((step) => (
+                  <span key={step.name} className="rounded-full border border-red/20 bg-red/8 px-2 py-1 text-[10px] text-red">
+                    {step.name} · {step.failed_count}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {metrics.by_agent.length > 0 && (
+          <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {metrics.by_agent.map((item) => (
+              <div key={item.agent} className="rounded-xl border border-border/70 bg-background/25 px-3 py-2.5 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-text">{AGENT_LABELS[item.agent as AgentRunRecord["agent"]] || item.agent}</span>
+                  <span className="text-dim">{item.run_count} 次</span>
+                </div>
+                <div className="mt-1 text-dim">失败 {item.failure_rate}% · 降级 {item.fallback_rate}% · 平均 {item.average_duration_ms} ms</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function HealthMetric({ label, value, tone }: { label: string; value: number; tone: string }) {
+  return (
+    <div className="rounded-xl bg-background/35 p-3">
+      <div className="text-xs text-dim">{label}</div>
+      <div className={cn("mt-1 text-2xl font-semibold", tone)}>{value}</div>
     </div>
   );
 }

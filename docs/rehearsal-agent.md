@@ -78,7 +78,7 @@ LLM 回答必须引用检索结果中的证据 ID，并通过 Pydantic 校验；
 
 ### Agent 运行记录
 
-`GET /api/rehearsal/agent-runs?limit=50` 提供一条独立的可观察性入口，当前覆盖剧本解析、调度草案、自动排班、对词和剧本问答五类运行。每条 `AgentRunRecord` 保存：
+`GET /api/rehearsal/agent-runs?limit=50` 提供一条独立的可观察性入口，当前覆盖剧本解析、调度草案、自动排班、对词、资源检查和剧本问答六类运行。每条 `AgentRunRecord` 保存：
 
 - Agent 类型、动作、绑定剧本和运行模式；
 - `completed`、`fallback` 或 `failed` 状态，以及后端耗时；
@@ -86,6 +86,8 @@ LLM 回答必须引用检索结果中的证据 ID，并通过 Pydantic 校验；
 - 降级或未排班等需要关注的原因。
 
 运行记录只保存结构化摘要，不把完整剧本、API Key 或模型原始响应写进审计记录；路径仍通过当前用户 ID 隔离。`GET /api/rehearsal/agent-runs/{run_id}` 可读取单次详情，前端“Agent运行记录”页面用它展示 Agent 的执行轨迹。这使得项目可以回答“Agent 经过了哪些步骤、哪一步使用了规则或模型、为什么没有直接给出结果”，而不是只展示最终 JSON。
+
+`GET /api/rehearsal/agent-runs/metrics?window_days=30` 由运行指标 Agent 聚合当前用户的完成、降级、失败、平均耗时和按 Agent 分布，并列出 trace 中出现频率最高的失败步骤。窗口限制为 7 到 365 天，失败率只统计 `status=failed`，不会把正常降级算成失败。LLM Chat 客户端对连接超时、限流和 5xx 等可重试错误最多执行 2 次，重试成功会在解析 warning、对词 note 或 RAG note 中留下记录；资源写入接口不使用自动重试，避免重复预约或重复保存。
 
 ### 排练复盘与镜子 Agent
 
@@ -138,7 +140,9 @@ LLM 回答必须引用检索结果中的证据 ID，并通过 Pydantic 校验；
 
 ### 资源管理 Resource Agent
 
-资源管理是独立入口，不要求先解析剧本。`GET/PUT /api/rehearsal/resources/inventory` 用用户隔离的 `data/users/{id}/rehearsal/resources/inventory.json` 保存道具和服装库存；每条记录包含类别、数量、状态、存放位置和备注。库存状态由剧团成员人工确认，Agent 不会把“有库存记录”直接当成“可用”。
+资源管理是独立入口，不要求先解析剧本。`GET/PUT /api/rehearsal/resources/inventory` 用用户隔离的 `data/users/{id}/rehearsal/resources/inventory.json` 保存道具和服装库存；每条记录包含类别、数量、状态、存放位置和备注。库存状态由剧团成员人工确认，Agent 不会把“有库存记录”直接当成“可用”。所有资源写入都会由 Resource Audit Agent 对比写入前后的结构化快照，保存到用户隔离的 `rehearsal/resources/audit.json`。
+
+`GET /api/rehearsal/resources/audit?limit=50` 返回库存、排练室、配乐、预算和发票的最近变更；每条记录会指出新增、修改或删除的资源、变化字段和摘要。审计只记录结构化元数据，不把凭证文件或模型密钥写入记录。
 
 `POST /api/rehearsal/resources/rooms` 保存排练室预约，并在写入前检查同一房间、同一天的区间是否重叠。边界相接（例如上一场 19:00-20:00，下一场 20:00-21:00）允许；实际重叠返回 `409`，避免把冲突留给排练当天处理。
 
@@ -254,6 +258,7 @@ Suggestion Agent 的第一版只做可解释判断：分类为 `safety`，或内
 - `POST /api/rehearsal/scripts/{script_id}/line-reading`
 - `POST /api/rehearsal/scripts/{script_id}/rag`
 - `GET /api/rehearsal/agent-runs?limit=50`
+- `GET /api/rehearsal/agent-runs/metrics?window_days=30`
 - `GET /api/rehearsal/agent-runs/{run_id}`
 - `POST /api/rehearsal/feedback`
 - `GET /api/rehearsal/feedback`
@@ -262,6 +267,7 @@ Suggestion Agent 的第一版只做可解释判断：分类为 `safety`，或内
 - `POST /api/rehearsal/scripts/{script_id}/diff`
 - `GET /api/rehearsal/scripts/{script_id}/stage/{scene_id}`
 - `GET/PUT /api/rehearsal/resources/inventory`
+- `GET /api/rehearsal/resources/audit?limit=50`
 - `GET/POST /api/rehearsal/resources/rooms`
 - `DELETE /api/rehearsal/resources/rooms/{booking_id}`
 - `POST /api/rehearsal/scripts/{script_id}/resources/check`

@@ -1,10 +1,13 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from pydantic import ValidationError
 
 from backend.config import settings
+from backend.llm_provider import ChatLLM
 from backend.rehearsal.agent import ScriptAnalysisAgent
 from backend.rehearsal.feedback_agent import RehearsalMirrorAgent
 from backend.rehearsal.finance_agent import ResourceFinanceAgent
@@ -14,12 +17,14 @@ from backend.rehearsal.metrics_agent import RehearsalMetricsAgent
 from backend.rehearsal.motto_agent import MottoAgent
 from backend.rehearsal.promo_agent import PromoCopyAgent
 from backend.rehearsal.rag_agent import ScriptRagAgent
-from backend.rehearsal.resource_agent import ResourceAgent, room_booking_conflicts
+from backend.rehearsal.resource_agent import ResourceAgent, ResourceAuditAgent, room_booking_conflicts
 from backend.rehearsal.run_log import outcome_status, record_agent_run
-from backend.rehearsal.storage import get_agent_run, list_agent_runs
+from backend.rehearsal.run_metrics import AgentRunMetricsAgent
+from backend.rehearsal.storage import get_agent_run, list_agent_runs, list_resource_audits, save_resource_audit
 from backend.rehearsal.suggestion_agent import SuggestionInboxAgent
 from backend.rehearsal.models import (
     AvailabilitySlot,
+    AgentRunRecord,
     AgentStep,
     BudgetLineItem,
     InvoiceRecord,
@@ -31,6 +36,7 @@ from backend.rehearsal.models import (
     RehearsalFeedbackRequest,
     RehearsalLogRequest,
     ResourceInventoryItem,
+    ResourceAuditRecord,
     MusicTimelineNote,
     RoomBooking,
     RoomBookingRequest,
@@ -490,6 +496,123 @@ def test_resource_agent_explains_ready_maintenance_and_missing_props():
     assert "没有匹配记录" in next(item.note for item in result.requirements if item.name == "信封")
 
 
+def test_resource_audit_agent_explains_created_updated_and_unchanged_records():
+    before = [
+        ResourceInventoryItem(resource_id="a" * 32, category="prop", name="椅子", quantity=1),
+    ]
+    after = [
+        ResourceInventoryItem(resource_id="a" * 32, category="prop", name="椅子", quantity=2),
+        ResourceInventoryItem(resource_id="b" * 32, category="prop", name="手电筒", quantity=1),
+    ]
+
+    audit = ResourceAuditAgent().compare(
+        resource_type="inventory",
+        operation="replace",
+        before=before,
+        after=after,
+    )
+
+    assert isinstance(audit, ResourceAuditRecord)
+    assert audit.changed_count == 2
+    assert audit.summary == "库存变更：新增 1 条、修改 1 条。"
+    assert {item.change_type for item in audit.changes} == {"created", "updated"}
+    updated = next(item for item in audit.changes if item.change_type == "updated")
+    assert updated.label == "椅子"
+    assert updated.changed_fields == ["数量"]
+    assert ResourceAuditAgent().compare(
+        resource_type="inventory",
+        operation="replace",
+        before=after,
+        after=after,
+    ) is None
+
+
+def test_agent_run_metrics_aggregates_status_and_failed_trace_steps():
+    records = [
+        AgentRunRecord(
+            run_id="a" * 32,
+            agent="script-analysis",
+            action="解析",
+            summary="完成",
+            trace=[AgentStep(name="校验", status="completed", summary="完成")],
+            duration_ms=100,
+            created_at="2026-08-20T10:00:00+00:00",
+        ),
+        AgentRunRecord(
+            run_id="b" * 32,
+            agent="line-reading",
+            action="对词",
+            status="fallback",
+            summary="降级",
+            trace=[AgentStep(name="选择策略", status="repaired", summary="回退")],
+            duration_ms=200,
+            created_at="2026-08-21T10:00:00+00:00",
+        ),
+        AgentRunRecord(
+            run_id="c" * 32,
+            agent="resource-check",
+            action="检查资源",
+            status="failed",
+            summary="失败",
+            trace=[AgentStep(name="匹配库存", status="failed", summary="库存文件读取失败")],
+            duration_ms=400,
+            created_at="2026-08-22T10:00:00+00:00",
+        ),
+        AgentRunRecord(
+            run_id="d" * 32,
+            agent="resource-check",
+            action="旧检查",
+            status="failed",
+            summary="窗口外",
+            trace=[AgentStep(name="匹配库存", status="failed", summary="不应计入")],
+            duration_ms=900,
+            created_at="2026-07-01T10:00:00+00:00",
+        ),
+    ]
+
+    metrics = AgentRunMetricsAgent().summarize(
+        records,
+        window_days=30,
+        as_of=datetime(2026, 8, 25, 12, 0, tzinfo=timezone.utc),
+    )
+
+    assert metrics.total_runs == 3
+    assert metrics.completed_runs == 1
+    assert metrics.fallback_runs == 1
+    assert metrics.failed_runs == 1
+    assert metrics.failure_rate == 33.3
+    assert metrics.fallback_rate == 33.3
+    assert metrics.average_duration_ms == 233
+    assert metrics.failed_steps[0].name == "匹配库存"
+    assert metrics.failed_steps[0].failed_count == 1
+
+
+def test_llm_provider_retries_transient_errors_with_a_two_attempt_budget():
+    calls = {"count": 0}
+
+    class TemporaryProviderError(Exception):
+        status_code = 503
+
+    def create_completion(**_kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise TemporaryProviderError("temporary outage")
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))],
+        )
+
+    fake_client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create_completion)),
+    )
+    with patch("backend.llm_provider.OpenAI", return_value=fake_client), patch("backend.llm_provider.time.sleep") as sleep:
+        llm = ChatLLM("demo", "key", "https://example.test/v1", 0.0)
+        assert llm.invoke([{ "role": "user", "content": "ping" }]) == "ok"
+
+    assert calls["count"] == 2
+    assert llm.last_attempts == 2
+    sleep.assert_called_once()
+
+
 def test_resource_models_reject_invalid_booking_and_conflict_only_when_intervals_overlap():
     invalid_values = [
         {"room_name": "排练室 A", "date": "2026-02-30", "start": "19:00", "end": "20:00"},
@@ -932,5 +1055,25 @@ def test_agent_run_record_is_user_scoped_and_preserves_explainable_trace():
             assert restored.script_title == "轨道之外"
             assert get_agent_run(record.run_id, user_id="actor-b") is None
             assert [item.run_id for item in list_agent_runs(user_id="actor-a")] == [record.run_id]
+        finally:
+            settings.base_dir = original_base_dir
+
+
+def test_resource_audit_storage_is_user_scoped_and_keeps_latest_first():
+    original_base_dir = settings.base_dir
+    with TemporaryDirectory() as temp_dir:
+        try:
+            settings.base_dir = Path(temp_dir)
+            audit = ResourceAuditAgent().compare(
+                resource_type="inventory",
+                operation="replace",
+                before=[],
+                after=[ResourceInventoryItem(resource_id="a" * 32, category="prop", name="椅子")],
+            )
+            assert audit is not None
+            save_resource_audit(audit, user_id="actor-a")
+
+            assert [item.audit_id for item in list_resource_audits(user_id="actor-a")] == [audit.audit_id]
+            assert list_resource_audits(user_id="actor-b") == []
         finally:
             settings.base_dir = original_base_dir

@@ -64,7 +64,7 @@ class AgentRunRecord(BaseModel):
     """A persisted, user-scoped run summary for an inspectable rehearsal Agent."""
 
     run_id: str
-    agent: Literal["script-analysis", "schedule-draft", "schedule-plan", "line-reading", "script-rag"]
+    agent: Literal["script-analysis", "schedule-draft", "schedule-plan", "line-reading", "script-rag", "resource-check"]
     action: str
     script_id: str | None = None
     script_title: str = ""
@@ -75,6 +75,40 @@ class AgentRunRecord(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     duration_ms: int = Field(default=0, ge=0)
     created_at: str
+
+
+class AgentRunMetricItem(BaseModel):
+    agent: str
+    run_count: int = Field(ge=0)
+    completed_count: int = Field(ge=0)
+    fallback_count: int = Field(ge=0)
+    failed_count: int = Field(ge=0)
+    failure_rate: float = Field(ge=0, le=100)
+    fallback_rate: float = Field(ge=0, le=100)
+    average_duration_ms: int = Field(default=0, ge=0)
+
+
+class AgentFailureStep(BaseModel):
+    name: str
+    failed_count: int = Field(ge=0)
+    last_summary: str = ""
+
+
+class AgentRunMetricsResponse(BaseModel):
+    window_days: int = Field(ge=7, le=365)
+    from_datetime: str
+    to_datetime: str
+    total_runs: int = Field(ge=0)
+    completed_runs: int = Field(ge=0)
+    fallback_runs: int = Field(ge=0)
+    failed_runs: int = Field(ge=0)
+    failure_rate: float = Field(ge=0, le=100)
+    fallback_rate: float = Field(ge=0, le=100)
+    average_duration_ms: int = Field(default=0, ge=0)
+    by_agent: list[AgentRunMetricItem] = Field(default_factory=list)
+    failed_steps: list[AgentFailureStep] = Field(default_factory=list)
+    note: str = ""
+    generated_at: str
 
 
 class ScriptParseRequest(BaseModel):
@@ -178,6 +212,24 @@ class ResourceInventoryItem(BaseModel):
 
 class ResourceInventoryUpdateRequest(BaseModel):
     items: list[ResourceInventoryItem] = Field(default_factory=list, max_length=1_000)
+
+
+class ResourceAuditChange(BaseModel):
+    change_type: Literal["created", "updated", "deleted"]
+    resource_id: str
+    label: str
+    changed_fields: list[str] = Field(default_factory=list)
+    summary: str
+
+
+class ResourceAuditRecord(BaseModel):
+    audit_id: str
+    resource_type: Literal["inventory", "room", "music", "budget", "invoice"]
+    operation: Literal["replace", "create", "delete"]
+    changed_count: int = Field(ge=0)
+    changes: list[ResourceAuditChange] = Field(default_factory=list)
+    summary: str
+    created_at: str
 
 
 class RoomBookingRequest(BaseModel):

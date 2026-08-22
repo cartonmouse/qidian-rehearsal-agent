@@ -10,7 +10,9 @@ backends (esp. local HuggingFace models) are expensive, so they are cached per
 (user, config-signature) and rebuilt only when the signature changes.
 """
 
+import asyncio
 import logging
+import time
 from collections.abc import AsyncIterator
 
 from openai import AsyncOpenAI, OpenAI
@@ -34,6 +36,20 @@ logger = logging.getLogger("uvicorn")
 
 _DEFAULT_TEMPERATURE = 0.7
 _COPILOT_TEMPERATURE = 0.3  # Copilot 场景偏确定性
+_MAX_LLM_ATTEMPTS = 2
+_RETRY_DELAY_SECONDS = 0.15
+
+
+def _is_retryable_llm_error(exc: Exception) -> bool:
+    status_code = getattr(exc, "status_code", None)
+    if isinstance(status_code, int):
+        return status_code in {408, 409, 429} or status_code >= 500
+    return isinstance(exc, (TimeoutError, ConnectionError)) or exc.__class__.__name__ in {
+        "APIConnectionError",
+        "APITimeoutError",
+        "RateLimitError",
+        "InternalServerError",
+    }
 
 
 class ProviderNotConfigured(RuntimeError):
@@ -135,27 +151,60 @@ class ChatLLM:
         self.temperature = temperature
         self._api_key = api_key
         self._api_base = api_base or None
+        self.last_attempts = 0
 
     def invoke(self, messages: list[dict]) -> str:
         client = OpenAI(api_key=self._api_key, base_url=self._api_base)
-        resp = client.chat.completions.create(
-            model=self.model, messages=messages, temperature=self.temperature,
-        )
-        return resp.choices[0].message.content or ""
+        self.last_attempts = 0
+        for attempt in range(1, _MAX_LLM_ATTEMPTS + 1):
+            self.last_attempts = attempt
+            try:
+                resp = client.chat.completions.create(
+                    model=self.model, messages=messages, temperature=self.temperature,
+                )
+                return resp.choices[0].message.content or ""
+            except Exception as exc:
+                if attempt >= _MAX_LLM_ATTEMPTS or not _is_retryable_llm_error(exc):
+                    raise
+                logger.warning("LLM request retry %s/%s after %s", attempt, _MAX_LLM_ATTEMPTS, exc.__class__.__name__)
+                time.sleep(_RETRY_DELAY_SECONDS * attempt)
+        raise RuntimeError("LLM request exhausted retry budget")
 
     async def ainvoke(self, messages: list[dict]) -> str:
         client = AsyncOpenAI(api_key=self._api_key, base_url=self._api_base)
-        resp = await client.chat.completions.create(
-            model=self.model, messages=messages, temperature=self.temperature,
-        )
-        return resp.choices[0].message.content or ""
+        self.last_attempts = 0
+        for attempt in range(1, _MAX_LLM_ATTEMPTS + 1):
+            self.last_attempts = attempt
+            try:
+                resp = await client.chat.completions.create(
+                    model=self.model, messages=messages, temperature=self.temperature,
+                )
+                return resp.choices[0].message.content or ""
+            except Exception as exc:
+                if attempt >= _MAX_LLM_ATTEMPTS or not _is_retryable_llm_error(exc):
+                    raise
+                logger.warning("Async LLM request retry %s/%s after %s", attempt, _MAX_LLM_ATTEMPTS, exc.__class__.__name__)
+                await asyncio.sleep(_RETRY_DELAY_SECONDS * attempt)
+        raise RuntimeError("LLM request exhausted retry budget")
 
     async def astream(self, messages: list[dict]) -> AsyncIterator[str]:
         client = AsyncOpenAI(api_key=self._api_key, base_url=self._api_base)
-        stream = await client.chat.completions.create(
-            model=self.model, messages=messages, temperature=self.temperature,
-            stream=True,
-        )
+        self.last_attempts = 0
+        for attempt in range(1, _MAX_LLM_ATTEMPTS + 1):
+            self.last_attempts = attempt
+            try:
+                stream = await client.chat.completions.create(
+                    model=self.model, messages=messages, temperature=self.temperature,
+                    stream=True,
+                )
+                break
+            except Exception as exc:
+                if attempt >= _MAX_LLM_ATTEMPTS or not _is_retryable_llm_error(exc):
+                    raise
+                logger.warning("Streaming LLM request retry %s/%s after %s", attempt, _MAX_LLM_ATTEMPTS, exc.__class__.__name__)
+                await asyncio.sleep(_RETRY_DELAY_SECONDS * attempt)
+        else:
+            raise RuntimeError("Streaming LLM request exhausted retry budget")
         async for chunk in stream:
             if chunk.choices and chunk.choices[0].delta.content:
                 yield chunk.choices[0].delta.content
