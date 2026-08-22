@@ -359,6 +359,29 @@ def _evaluate_schedule(case: dict[str, Any], checks: list[CheckResult]) -> None:
         _check(checks, "batch_override_tool_name", batch_call.tool_name, "apply_manual_override_batch")
         _check(checks, "batch_override_atomic", batch_call.result.get("atomic"), True)
         _check(checks, "batch_override_count", batch_call.result.get("overridden_count"), batch_expected["count"])
+    for error_index, error_case in enumerate(expected.get("batch_override_errors", []), start=1):
+        item_specs = error_case["items"]
+        task_indices = error_case.get("task_indices", list(range(len(item_specs))))
+        if len(item_specs) != len(task_indices):
+            raise ValueError("batch override error eval must pair each slot with a task index")
+        if any(index < 0 or index >= len(planned.tasks) for index in task_indices):
+            raise ValueError("batch override error eval task index is out of range")
+        overrides = [ScheduleOverrideRequest(
+            task_id=planned.tasks[task_index].task_id,
+            date=slot["date"],
+            start=slot["start"],
+            end=slot["end"],
+            note="eval batch boundary",
+        ) for task_index, slot in zip(task_indices, item_specs)]
+        try:
+            agent.apply_manual_overrides(planned, overrides)
+        except ValueError as exc:
+            message = str(exc)
+            expected_message = error_case["message_contains"]
+            found = expected_message in message
+            _check(checks, f"batch_override_error_{error_index}", found, True, passed=found)
+        else:
+            _check(checks, f"batch_override_error_{error_index}", False, True, passed=False)
 
 
 def _evaluate_resource_check(case: dict[str, Any], checks: list[CheckResult]) -> None:

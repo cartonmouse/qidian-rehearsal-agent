@@ -75,7 +75,25 @@
           {"date": "2026-08-26", "start": "19:45", "end": "20:30"}
         ],
         "count": 2
-      }
+      },
+      "batch_override_errors": [
+        {
+          "task_indices": [0, 1],
+          "items": [
+            {"date": "2026-08-27", "start": "19:00", "end": "19:45"},
+            {"date": "2026-08-27", "start": "19:00", "end": "19:45"}
+          ],
+          "message_contains": "批量确认存在资源冲突"
+        },
+        {
+          "task_indices": [0, 0],
+          "items": [
+            {"date": "2026-08-27", "start": "20:00", "end": "20:45"},
+            {"date": "2026-08-27", "start": "20:00", "end": "20:45"}
+          ],
+          "message_contains": "不能重复包含同一排练任务"
+        }
+      ]
     }
   },
   {

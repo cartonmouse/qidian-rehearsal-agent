@@ -283,6 +283,62 @@ def test_schedule_agent_batch_override_is_atomic_and_exposes_contract():
     assert [task.status for task in planned.tasks] == ["scheduled", "scheduled"]
 
 
+def test_schedule_agent_batch_override_rejects_resource_conflicts_and_duplicates():
+    analysis = ScriptAnalysis(
+        script_id="batch-boundaries",
+        title="批量边界",
+        version_label="v1",
+        review_status="confirmed",
+        scenes=[
+            Scene(
+                scene_id="scene-1",
+                number=1,
+                title="第一场",
+                characters=["小林"],
+                props=["椅子"],
+                source=SourceSpan(start_line=1, end_line=2),
+            ),
+            Scene(
+                scene_id="scene-2",
+                number=2,
+                title="第二场",
+                characters=["小周"],
+                props=["椅子"],
+                source=SourceSpan(start_line=3, end_line=4),
+            ),
+        ],
+        created_at="2026-08-25T00:00:00Z",
+    )
+    agent = RehearsalScheduleAgent()
+    draft = agent.run(analysis, default_minutes=45)
+    planned = agent.assign(draft, [
+        AvailabilitySlot(actor="小林", date="2026-08-25", start="19:00", end="21:00"),
+        AvailabilitySlot(actor="小周", date="2026-08-25", start="19:00", end="21:00"),
+    ])
+    same_slot = [ScheduleOverrideRequest(
+        task_id=task.task_id,
+        date="2026-08-26",
+        start="19:00",
+        end="19:45",
+    ) for task in planned.tasks]
+
+    try:
+        agent.apply_manual_overrides(planned, same_slot)
+    except ValueError as exc:
+        assert "批量确认存在资源冲突" in str(exc)
+    else:
+        raise AssertionError("shared props must reject overlapping batch overrides")
+    assert [task.status for task in planned.tasks] == ["scheduled", "scheduled"]
+
+    try:
+        agent.apply_manual_overrides(planned, [same_slot[0], same_slot[0]])
+    except ValueError as exc:
+        assert "不能重复包含同一排练任务" in str(exc)
+    else:
+        raise AssertionError("duplicate task ids must reject the complete batch")
+    assert [task.status for task in planned.tasks] == ["scheduled", "scheduled"]
+
+
 def test_availability_slot_rejects_invalid_calendar_and_interval():
     invalid_values = [
         {"actor": "小林", "date": "2026-02-30", "start": "19:00", "end": "21:00"},
