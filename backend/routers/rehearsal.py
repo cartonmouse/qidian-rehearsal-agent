@@ -820,6 +820,7 @@ def create_schedule_draft(
         draft = RehearsalScheduleAgent().run(
             analysis,
             default_minutes=request.default_minutes,
+            costume_changeover_minutes=request.costume_changeover_minutes,
             preview=request.preview,
             agent_run_id=run_id,
             root_run_id=run_id,

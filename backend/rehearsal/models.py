@@ -148,6 +148,7 @@ class ScriptReviewRequest(BaseModel):
 
 class ScheduleDraftRequest(BaseModel):
     default_minutes: int = Field(default=45, ge=15, le=180)
+    costume_changeover_minutes: int = Field(default=10, ge=0, le=120)
     preview: bool = False
 
 
@@ -1128,6 +1129,7 @@ class ScheduleResourceContext(BaseModel):
     invoices: list[InvoiceRecord] = Field(default_factory=list)
     costume_inventory: list[ResourceInventoryItem] = Field(default_factory=list)
     costume_capacities: dict[str, int] = Field(default_factory=dict)
+    costume_changeover_minutes: int = Field(default=10, ge=0, le=120)
     costume_requirements: list[CostumeRequirement] = Field(default_factory=list)
     estimated_total: float = Field(default=0, ge=0)
     actual_total: float = Field(default=0, ge=0)

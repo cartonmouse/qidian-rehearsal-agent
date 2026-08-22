@@ -359,6 +359,7 @@ export interface ScheduleResourceContext {
   invoices: InvoiceRecord[];
   costume_inventory: ResourceInventoryItem[];
   costume_capacities: Record<string, number>;
+  costume_changeover_minutes: number;
   costume_requirements: CostumeRequirement[];
   estimated_total: number;
   actual_total: number;
@@ -796,11 +797,16 @@ export async function generateScheduleDraft(
   scriptId: string,
   defaultMinutes = 45,
   preview = false,
+  costumeChangeoverMinutes = 10,
 ): Promise<ScheduleDraft> {
   const response = await authFetch(`/api/rehearsal/scripts/${encodeURIComponent(scriptId)}/schedule/draft`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ default_minutes: defaultMinutes, preview }),
+    body: JSON.stringify({
+      default_minutes: defaultMinutes,
+      costume_changeover_minutes: costumeChangeoverMinutes,
+      preview,
+    }),
   });
   await ensureOk(response);
   return response.json();

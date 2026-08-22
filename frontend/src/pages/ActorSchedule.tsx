@@ -83,6 +83,7 @@ export default function ActorSchedule() {
   const [planning, setPlanning] = useState(false);
   const [importing, setImporting] = useState(false);
   const [rehearsalRoom, setRehearsalRoom] = useState("");
+  const [costumeChangeoverMinutes, setCostumeChangeoverMinutes] = useState(10);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const availabilityFileRef = useRef<HTMLInputElement>(null);
@@ -135,7 +136,12 @@ export default function ActorSchedule() {
     setError("");
     void getScheduleDraft(selectedScriptId)
       .then((draft) => {
-        if (!cancelled) setSchedule(draft);
+        if (!cancelled) {
+          setSchedule(draft);
+          if (draft?.resource_context) {
+            setCostumeChangeoverMinutes(draft.resource_context.costume_changeover_minutes);
+          }
+        }
       })
       .catch((reason) => {
         if (!cancelled) {
@@ -207,7 +213,7 @@ export default function ActorSchedule() {
     setMessage("");
     try {
       const preview = selectedScript.review_status === "pending";
-      setSchedule(await generateScheduleDraft(selectedScript.script_id, 45, preview));
+      setSchedule(await generateScheduleDraft(selectedScript.script_id, 45, preview, costumeChangeoverMinutes));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "排练任务生成失败");
     } finally {
@@ -364,6 +370,19 @@ export default function ActorSchedule() {
                       <span className="rounded-full bg-orange/10 px-2.5 py-1 text-orange">{selectedScript.character_count} 角色</span>
                     </div>
                   )}
+                  <label className="mt-4 block text-xs text-dim">
+                    服装换装缓冲（分钟）
+                    <input
+                      type="number"
+                      min={0}
+                      max={120}
+                      step={5}
+                      value={costumeChangeoverMinutes}
+                      onChange={(event) => setCostumeChangeoverMinutes(Math.max(0, Math.min(120, Number(event.target.value) || 0)))}
+                      className="mt-1 h-10 w-full rounded-xl border border-border bg-input px-3 text-sm text-text outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent/30"
+                    />
+                    <span className="mt-1 block text-[11px] leading-5">同一演员前后场次服装发生变化时，自动排班会在两场之间预留这段时间。</span>
+                  </label>
                 </>
               ) : (
                 <div className="mt-4 rounded-xl border border-border bg-background/40 px-3 py-4 text-sm leading-6 text-dim">
@@ -663,6 +682,10 @@ function ScheduleOverview({
               <div>
                 <div className="font-medium text-text">剧本服装需求</div>
                 <div>{schedule.resource_context.costume_requirements.slice(0, 4).map((item) => `${item.name} · ${item.scene_ids.join("、")}`).join("；") || "无"}{schedule.resource_context.unmatched_costume_requirement_count > 0 && <span className="text-red"> · 未匹配 {schedule.resource_context.unmatched_costume_requirement_count} 项</span>}</div>
+              </div>
+              <div>
+                <div className="font-medium text-text">换装缓冲</div>
+                <div>相邻服装变化预留 {schedule.resource_context.costume_changeover_minutes} 分钟</div>
               </div>
             </div>
           )}

@@ -303,6 +303,7 @@ def _evaluate_schedule(case: dict[str, Any], checks: list[CheckResult]) -> None:
     draft = agent.run(
         analysis,
         default_minutes=int(case.get("default_minutes", 45)),
+        costume_changeover_minutes=int(case.get("costume_changeover_minutes", 10)),
         agent_run_id=draft_run_id,
         root_run_id=draft_run_id,
         music_notes=music_notes,
@@ -372,6 +373,13 @@ def _evaluate_schedule(case: dict[str, Any], checks: list[CheckResult]) -> None:
                     resource_context.costume_capacities,
                     resource_expected["costume_capacities"],
                 )
+            if "costume_changeover_minutes" in resource_expected:
+                _check(
+                    checks,
+                    "resource_costume_changeover_minutes",
+                    resource_context.costume_changeover_minutes,
+                    resource_expected["costume_changeover_minutes"],
+                )
             _check(checks, "resource_estimated_total", resource_context.estimated_total, resource_expected["estimated_total"])
             _check(checks, "resource_actual_total", resource_context.actual_total, resource_expected["actual_total"])
             _check(checks, "resource_invoice_total", resource_context.invoice_total, resource_expected["invoice_total"])
@@ -398,6 +406,13 @@ def _evaluate_schedule(case: dict[str, Any], checks: list[CheckResult]) -> None:
             "first_task_end_equals_second_start",
             planned.tasks[0].scheduled_end == planned.tasks[1].scheduled_start,
             expected["first_task_end_equals_second_start"],
+        )
+    if "scheduled_windows" in expected:
+        _check(
+            checks,
+            "scheduled_windows",
+            [(task.scheduled_start, task.scheduled_end) for task in planned.tasks],
+            [tuple(window) for window in expected["scheduled_windows"]],
         )
     if expected.get("second_task_reason_contains"):
         reason = draft.tasks[1].parallel_reason if len(draft.tasks) > 1 else ""

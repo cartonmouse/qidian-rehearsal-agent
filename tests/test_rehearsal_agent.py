@@ -609,6 +609,7 @@ def test_schedule_agent_captures_music_and_budget_context():
         "costume_inventory_count": 2,
         "costume_issue_count": 2,
         "costume_capacities": {"灰色外套": 1, "红色围巾": 1},
+        "costume_changeover_minutes": 10,
         "costume_requirement_count": 1,
         "unmatched_costume_requirement_count": 0,
         "warning_count": 4,
@@ -753,6 +754,79 @@ def test_schedule_agent_reserves_costume_capacity_during_auto_assignment():
     assert short_plan.tasks[1].status == "unassigned"
     assert "排练资源没有可用并行容量" in (short_plan.tasks[1].unassigned_reason or "")
     assert "灰色外套" in (short_plan.tasks[1].unassigned_reason or "")
+
+
+def test_schedule_agent_reserves_costume_changeover_between_same_actor_scenes():
+    analysis = ScriptAnalysisAgent().run(
+        title="换装缓冲",
+        version_label="v1",
+        script_text=(
+            "第一场\n（林澄穿灰色外套。）\n林澄：开始。\n"
+            "第二场\n（林澄穿黑色西装。）\n林澄：继续。"
+        ),
+        script_id="costume-changeover",
+        analysis_mode="rules",
+    ).model_copy(update={"review_status": "confirmed"})
+    agent = RehearsalScheduleAgent()
+    draft = agent.run(analysis, costume_changeover_minutes=10)
+    assert draft.resource_context is not None
+    assert draft.resource_context.costume_changeover_minutes == 10
+    planned = agent.assign(draft, [
+        AvailabilitySlot(actor="林澄", date="2026-08-25", start="19:00", end="21:00"),
+    ])
+
+    assert [(task.scheduled_start, task.scheduled_end) for task in planned.tasks] == [
+        ("19:00", "19:45"),
+        ("19:55", "20:40"),
+    ]
+    assert all(task.status == "scheduled" for task in planned.tasks)
+    assert all(
+        call.arguments["costume_changeover_minutes"] == 10
+        for call in planned.tool_calls
+        if call.tool_name == "find_common_actor_slot"
+    )
+
+    short_plan = agent.assign(draft, [
+        AvailabilitySlot(actor="林澄", date="2026-08-25", start="19:00", end="20:00"),
+    ])
+    assert short_plan.tasks[1].status == "unassigned"
+    assert "换装缓冲" in (short_plan.tasks[1].unassigned_reason or "")
+
+    same_costume_analysis = ScriptAnalysisAgent().run(
+        title="同服装无缓冲",
+        version_label="v1",
+        script_text=(
+            "第一场\n（林澄穿灰色外套。）\n林澄：开始。\n"
+            "第二场\n（林澄穿灰色外套。）\n林澄：继续。"
+        ),
+        script_id="same-costume-no-changeover",
+        analysis_mode="rules",
+    ).model_copy(update={"review_status": "confirmed"})
+    same_costume_plan = agent.assign(
+        agent.run(same_costume_analysis, costume_changeover_minutes=10),
+        [AvailabilitySlot(actor="林澄", date="2026-08-25", start="19:00", end="21:00")],
+    )
+    assert same_costume_plan.tasks[1].scheduled_start == "19:45"
+
+    batch = [
+        ScheduleOverrideRequest(
+            task_id=task.task_id,
+            date="2026-08-26",
+            start=start,
+            end=end,
+        )
+            for task, start, end in zip(
+                draft.tasks,
+                ("19:00", "19:50"),
+                ("19:50", "20:35"),
+            )
+    ]
+    try:
+        agent.apply_manual_overrides(planned, batch)
+    except ValueError as exc:
+        assert "换装缓冲" in str(exc)
+    else:
+        raise AssertionError("batch overrides must reject an insufficient costume changeover gap")
 
 
 def test_line_reading_follows_selected_role_and_source_lines():
@@ -1850,6 +1924,6 @@ def test_rehearsal_agent_eval_set_is_reproducible_without_provider_keys():
 
     report = evaluate_cases()
 
-    assert report["total"] == 14
+    assert report["total"] == 15
     assert report["failed"] == 0
     assert report["pass_rate"] == 100.0

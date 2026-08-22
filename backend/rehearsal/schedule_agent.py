@@ -102,6 +102,7 @@ class RehearsalScheduleAgent:
         analysis: ScriptAnalysis,
         *,
         default_minutes: int = 45,
+        costume_changeover_minutes: int = 10,
         preview: bool = False,
         agent_run_id: str | None = None,
         parent_run_id: str | None = None,
@@ -124,6 +125,7 @@ class RehearsalScheduleAgent:
             invoices,
             inventory,
             analysis.costumes,
+            costume_changeover_minutes,
         )
         costume_capacities = {
             _normalize_label(name): capacity
@@ -138,6 +140,7 @@ class RehearsalScheduleAgent:
                 "scene_count": len(analysis.scenes),
                 "review_status": analysis.review_status,
                 "preview": preview,
+                "costume_changeover_minutes": costume_changeover_minutes,
             },
             result={"review_gate": "passed" if analysis.review_status != "pending" or preview else "blocked"},
             summary=(
@@ -278,6 +281,7 @@ class RehearsalScheduleAgent:
                     "invoice_count": len(resource_context.invoices),
                     "costume_inventory_count": len(resource_context.costume_inventory),
                     "costume_capacities": resource_context.costume_capacities,
+                    "costume_changeover_minutes": resource_context.costume_changeover_minutes,
                     "costume_requirement_count": len(resource_context.costume_requirements),
                     "estimated_total": resource_context.estimated_total,
                     "actual_total": resource_context.actual_total,
@@ -291,6 +295,7 @@ class RehearsalScheduleAgent:
                     "costume_inventory_count": len(resource_context.costume_inventory),
                     "costume_issue_count": resource_context.costume_issue_count,
                     "costume_capacities": resource_context.costume_capacities,
+                    "costume_changeover_minutes": resource_context.costume_changeover_minutes,
                     "costume_requirement_count": len(resource_context.costume_requirements),
                     "unmatched_costume_requirement_count": resource_context.unmatched_costume_requirement_count,
                     "budget_variance": round(
@@ -339,6 +344,7 @@ class RehearsalScheduleAgent:
         invoices: list[InvoiceRecord] | None,
         inventory: list[ResourceInventoryItem] | None,
         costume_requirements: list[CostumeRequirement] | None,
+        costume_changeover_minutes: int,
     ) -> ScheduleResourceContext | None:
         music_cues = list(music_notes or [])
         items = list(budget_items or [])
@@ -392,6 +398,7 @@ class RehearsalScheduleAgent:
             invoices=invoice_records,
             costume_inventory=costumes,
             costume_capacities=costume_capacities,
+            costume_changeover_minutes=costume_changeover_minutes,
             costume_requirements=requirements,
             estimated_total=finance.estimated_total,
             actual_total=finance.actual_total,
@@ -424,17 +431,46 @@ class RehearsalScheduleAgent:
             actor_slots.sort(key=lambda item: (item[0], item[1]))
 
         busy: dict[str, list[tuple[str, int, int]]] = defaultdict(list)
+        changeover_busy: dict[str, list[tuple[str, int, int]]] = defaultdict(list)
         busy_resources: dict[str, list[tuple[str, int, int]]] = defaultdict(list)
+        last_costumes_by_actor: dict[str, set[str]] = {}
+        last_assignment_by_actor: dict[str, tuple[str, int, int]] = {}
+        costume_changeover_minutes = (
+            draft.resource_context.costume_changeover_minutes
+            if draft.resource_context
+            else 0
+        )
         planned: list[ScheduleTask] = []
         tool_calls = list(draft.tool_calls)
         for task in sorted(draft.tasks, key=lambda item: (item.parallel_group, item.scene_number)):
             actors = task.required_characters or sorted(slots_by_actor)
+            current_costumes = {_normalize_label(costume) for costume in task.costumes}
+            for actor in actors:
+                previous_costumes = last_costumes_by_actor.get(actor)
+                previous_assignment = last_assignment_by_actor.get(actor)
+                if (
+                    previous_costumes is not None
+                    and previous_assignment is not None
+                    and previous_costumes != current_costumes
+                    and (previous_costumes or current_costumes)
+                    and costume_changeover_minutes > 0
+                ):
+                    previous_date, _, previous_end = previous_assignment
+                    interval = (
+                        previous_date,
+                        previous_end,
+                        previous_end + costume_changeover_minutes,
+                    )
+                    if interval not in changeover_busy[actor]:
+                        changeover_busy[actor].append(interval)
             resource_requirements = _task_resource_requirements(task, draft.resource_context)
             assignment, reason = self._find_interval(
                 actors=actors,
                 duration=task.estimated_minutes,
                 slots_by_actor=slots_by_actor,
                 busy=busy,
+                changeover_busy=changeover_busy,
+                costume_changeover_minutes=costume_changeover_minutes,
                 resources=resource_requirements,
                 busy_resources=busy_resources,
             )
@@ -445,6 +481,8 @@ class RehearsalScheduleAgent:
                     reason=reason,
                     slots_by_actor=slots_by_actor,
                     busy=busy,
+                    changeover_busy=changeover_busy,
+                    costume_changeover_minutes=costume_changeover_minutes,
                     resources=resource_requirements,
                     busy_resources=busy_resources,
                 )
@@ -460,6 +498,7 @@ class RehearsalScheduleAgent:
                         "scene_number": task.scene_number,
                         "actors": actors,
                         "duration_minutes": task.estimated_minutes,
+                        "costume_changeover_minutes": costume_changeover_minutes,
                         "resources": [
                             {"kind": kind, "name": label, "capacity": capacity}
                             for _, kind, label, capacity in resource_requirements
@@ -469,6 +508,7 @@ class RehearsalScheduleAgent:
                     result={
                         "status": "unassigned",
                         "reason": reason,
+                        "costume_changeover_minutes": costume_changeover_minutes,
                         "conflict_priority": conflict_priority,
                         "alternatives": [alternative.model_dump(mode="json") for alternative in alternatives],
                     },
@@ -493,6 +533,8 @@ class RehearsalScheduleAgent:
             date, start, end = assignment
             for actor in actors:
                 busy[actor].append((date, start, end))
+                last_costumes_by_actor[actor] = current_costumes
+                last_assignment_by_actor[actor] = (date, start, end)
             for resource_key, _, _, _ in resource_requirements:
                 busy_resources[resource_key].append((date, start, end))
             planned.append(task.model_copy(update={
@@ -514,6 +556,7 @@ class RehearsalScheduleAgent:
                     "scene_number": task.scene_number,
                     "actors": actors,
                     "duration_minutes": task.estimated_minutes,
+                    "costume_changeover_minutes": costume_changeover_minutes,
                     "resources": [
                         {"kind": kind, "name": label, "capacity": capacity}
                         for _, kind, label, capacity in resource_requirements
@@ -525,6 +568,7 @@ class RehearsalScheduleAgent:
                     "date": date,
                     "start": self._format_minutes(start),
                     "end": self._format_minutes(end),
+                    "costume_changeover_minutes": costume_changeover_minutes,
                 },
                 summary=(
                     f"第 {task.scene_number} 场找到共同档期：{date} "
@@ -714,6 +758,11 @@ class RehearsalScheduleAgent:
                     f"{prefix}：第 {left_task.scene_number} 场与第 {right_task.scene_number} 场"
                     f"共同需要服装“{label}”，超出库存容量 {capacity} 件"
                 )
+            if kind == "changeover":
+                raise ValueError(
+                    f"{prefix}：演员“{label}”的两场服装发生变化，"
+                    f"至少需要预留 {capacity} 分钟换装缓冲"
+                )
             resource_label = "演员" if kind == "actor" else "道具"
             raise ValueError(
                 f"{prefix}：第 {left_task.scene_number} 场与第 {right_task.scene_number} 场"
@@ -784,6 +833,7 @@ class RehearsalScheduleAgent:
                 "task_ids": selected_ids,
                 "override_count": len(selected_ids),
                 "room_names": sorted({item.room_name for item in room_slots if item.room_name}),
+                "costume_changeover_minutes": draft.resource_context.costume_changeover_minutes if draft.resource_context else 0,
             },
             result={
                 "status": "overridden",
@@ -896,6 +946,43 @@ class RehearsalScheduleAgent:
                             candidates[other_index],
                         )
                 active.append(candidate_index)
+
+        changeover_minutes = (
+            draft.resource_context.costume_changeover_minutes
+            if draft.resource_context
+            else 0
+        )
+        if changeover_minutes > 0:
+            actors = sorted({
+                actor
+                for task, _, _, _, _ in candidates
+                for actor in _unique(task.required_characters)
+            })
+            for actor in actors:
+                actor_candidates = sorted(
+                    [candidate for candidate in candidates if actor in _unique(candidate[0].required_characters)],
+                    key=lambda candidate: (candidate[2], candidate[3], candidate[4], candidate[0].task_id),
+                )
+                for left_index, left in enumerate(actor_candidates):
+                    for right in actor_candidates[left_index + 1:]:
+                        if left[2] != right[2]:
+                            continue
+                        if left[4] <= right[3]:
+                            earlier, later = left, right
+                        elif right[4] <= left[3]:
+                            earlier, later = right, left
+                        else:
+                            continue
+                        previous_costumes = {_normalize_label(costume) for costume in earlier[0].costumes}
+                        next_costumes = {_normalize_label(costume) for costume in later[0].costumes}
+                        if (
+                            previous_costumes == next_costumes
+                            or not (previous_costumes or next_costumes)
+                            or later[3] - earlier[4] >= changeover_minutes
+                            or (left[1] != "batch" and right[1] != "batch")
+                        ):
+                            continue
+                        return "changeover", actor, changeover_minutes, earlier, later
         return None
 
     @staticmethod
@@ -979,9 +1066,12 @@ class RehearsalScheduleAgent:
         duration: int,
         slots_by_actor: dict[str, list[tuple[str, int, int]]],
         busy: dict[str, list[tuple[str, int, int]]],
+        changeover_busy: dict[str, list[tuple[str, int, int]]] | None = None,
+        costume_changeover_minutes: int = 0,
         resources: list[tuple[str, str, str, int]] | None = None,
         busy_resources: dict[str, list[tuple[str, int, int]]] | None = None,
     ) -> tuple[tuple[str, int, int] | None, str]:
+        occupied_changeover = changeover_busy or {}
         required_resources = resources or []
         occupied_resources = busy_resources or {}
         missing = [actor for actor in actors if actor not in slots_by_actor]
@@ -990,6 +1080,7 @@ class RehearsalScheduleAgent:
 
         resource_blocked = False
         resource_blocker_labels: list[str] = []
+        changeover_blocked = False
         dates = sorted({date for actor in actors for date, _, _ in slots_by_actor[actor]})
         for date in dates:
             date_slots = {
@@ -1009,12 +1100,27 @@ class RehearsalScheduleAgent:
             )
             boundaries.update(
                 boundary
+                for actor in actors
+                for busy_date, start, end in occupied_changeover.get(actor, [])
+                if busy_date == date
+                for boundary in (start, end)
+            )
+            boundaries.update(
+                boundary
                 for resource_key, _, _, _ in required_resources
                 for busy_date, start, end in occupied_resources.get(resource_key, [])
                 if busy_date == date
                 for boundary in (start, end)
             )
             for start in sorted(boundaries):
+                end = start + duration
+                if any(
+                    busy_date == date and not (end <= busy_start or start >= busy_end)
+                    for actor in actors
+                    for busy_date, busy_start, busy_end in occupied_changeover.get(actor, [])
+                ):
+                    changeover_blocked = True
+                    continue
                 valid = True
                 for actor in actors:
                     covering = [
@@ -1048,6 +1154,8 @@ class RehearsalScheduleAgent:
                     continue
                 return (date, start, end), ""
 
+        if changeover_blocked:
+            return None, f"换装缓冲没有可用空间：相邻场次需预留 {costume_changeover_minutes} 分钟"
         if resource_blocked:
             labels = "、".join(dict.fromkeys(resource_blocker_labels))
             return None, f"排练资源没有可用并行容量：{labels}"
@@ -1061,6 +1169,8 @@ class RehearsalScheduleAgent:
         reason: str,
         slots_by_actor: dict[str, list[tuple[str, int, int]]],
         busy: dict[str, list[tuple[str, int, int]]],
+        changeover_busy: dict[str, list[tuple[str, int, int]]] | None = None,
+        costume_changeover_minutes: int = 0,
         resources: list[tuple[str, str, str, int]] | None = None,
         busy_resources: dict[str, list[tuple[str, int, int]]] | None = None,
     ) -> list[ScheduleAlternative]:
@@ -1087,6 +1197,8 @@ class RehearsalScheduleAgent:
                 duration=duration,
                 slots_by_actor=slots_by_actor,
                 busy=busy,
+                changeover_busy=changeover_busy,
+                costume_changeover_minutes=costume_changeover_minutes,
                 resources=resources,
                 busy_resources=busy_resources,
             )
