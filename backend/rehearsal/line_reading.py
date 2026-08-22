@@ -6,7 +6,9 @@ import difflib
 import json
 import logging
 import re
+from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -15,6 +17,8 @@ from backend.rehearsal.models import (
     DialogueLine,
     LineReadingRequest,
     LineReadingResponse,
+    LineReadingSession,
+    LineReadingTranscriptItem,
     LineReadingTurn,
     ScriptAnalysis,
 )
@@ -214,3 +218,101 @@ class LineReadingAgent:
             retry_note = f"LLM 请求在第 {llm.last_attempts} 次尝试后成功。"
             note = f"{note} {retry_note}".strip()
         return turns, note[:500]
+
+
+class LineReadingSessionAgent:
+    """Persist the cursor and transcript around the stateless line-turn Agent."""
+
+    def __init__(self, agent: LineReadingAgent | None = None):
+        self.agent = agent or LineReadingAgent()
+
+    def advance(
+        self,
+        analysis: ScriptAnalysis,
+        request: LineReadingRequest,
+        *,
+        session: LineReadingSession | None = None,
+        user_id: str | None = None,
+    ) -> tuple[LineReadingResponse, LineReadingSession]:
+        scene = next((item for item in analysis.scenes if item.scene_id == request.scene_id), None)
+        if scene is None:
+            raise ValueError("对词场次不存在")
+
+        now = datetime.now(timezone.utc).isoformat()
+        if session is not None:
+            if (
+                session.script_id != analysis.script_id
+                or session.scene_id != request.scene_id
+                or session.character != request.character.strip()
+            ):
+                raise ValueError("对词会话与当前剧本、场次或角色不匹配")
+            if session.mode != request.mode:
+                raise ValueError("对词会话模式已变化，请重新开始当前场次")
+            line_index = session.line_index
+            session_id = session.session_id
+            created_at = session.created_at
+            previous_transcript = list(session.transcript)
+            previous_turn_count = session.turn_count
+            engine_counts = dict(session.engine_counts)
+        else:
+            line_index = request.line_index
+            session_id = uuid4().hex
+            created_at = now
+            previous_transcript = []
+            previous_turn_count = 0
+            engine_counts = {}
+
+        effective_request = request.model_copy(update={
+            "line_index": line_index,
+            "session_id": session_id,
+        })
+        response = self.agent.respond(analysis, effective_request, user_id=user_id)
+
+        additions: list[LineReadingTranscriptItem] = []
+        if request.user_text.strip():
+            source_line = (
+                scene.lines[line_index].source.start_line
+                if 0 <= line_index < len(scene.lines)
+                else None
+            )
+            additions.append(LineReadingTranscriptItem(
+                kind="actor",
+                character=request.character.strip(),
+                text=request.user_text.strip(),
+                source_line=source_line,
+            ))
+        additions.extend(LineReadingTranscriptItem(
+            kind="partner",
+            character=turn.character,
+            text=turn.text,
+            source_line=turn.source_line,
+        ) for turn in response.assistant_turns)
+        if response.feedback:
+            additions.append(LineReadingTranscriptItem(
+                kind="feedback",
+                text=response.feedback,
+            ))
+
+        engine_counts[response.engine] = engine_counts.get(response.engine, 0) + 1
+        next_index = response.next_line_index
+        updated_session = LineReadingSession(
+            session_id=session_id,
+            script_id=analysis.script_id,
+            scene_id=scene.scene_id,
+            scene_title=scene.title,
+            character=request.character.strip(),
+            mode=request.mode,
+            line_index=next_index if next_index is not None else len(scene.lines),
+            actor_prompt=response.actor_prompt,
+            transcript=[*previous_transcript, *additions],
+            turn_count=previous_turn_count + 1,
+            engine_counts=engine_counts,
+            finished=response.finished,
+            created_at=created_at,
+            updated_at=now,
+        )
+        return response.model_copy(update={
+            "session_id": session_id,
+            "transcript": updated_session.transcript,
+            "turn_count": updated_session.turn_count,
+        }), updated_session

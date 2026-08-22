@@ -15,8 +15,10 @@ import { useNavigate } from "react-router-dom";
 import {
   getScript,
   getScripts,
+  getLineReadingSession,
   readLine,
   type LineReadingResponse,
+  type LineReadingTranscriptItem,
   type ScriptAnalysis,
   type ScriptSummary,
 } from "@/api/rehearsal";
@@ -38,6 +40,25 @@ const ENGINE_LABELS: Record<LineReadingResponse["engine"], string> = {
   fallback: "规则降级",
 };
 
+function lineSessionStorageKey(scriptId: string, sceneId: string, character: string, mode: string): string {
+  return `qidian-line-reading:${scriptId}:${sceneId}:${character}:${mode}`;
+}
+
+function toTranscriptItem(item: LineReadingTranscriptItem): TranscriptItem {
+  if (item.kind === "partner") {
+    return {
+      kind: "partner",
+      character: item.character,
+      text: item.text,
+      sourceLine: item.source_line || 1,
+    };
+  }
+  if (item.kind === "actor") {
+    return { kind: "actor", character: item.character, text: item.text };
+  }
+  return { kind: "feedback", text: item.text };
+}
+
 export default function LineReading() {
   const navigate = useNavigate();
   const [scripts, setScripts] = useState<ScriptSummary[]>([]);
@@ -47,6 +68,8 @@ export default function LineReading() {
   const [character, setCharacter] = useState("");
   const [mode, setMode] = useState<"strict" | "adaptive">("strict");
   const [lineIndex, setLineIndex] = useState(0);
+  const [sessionId, setSessionId] = useState("");
+  const [sessionTurnCount, setSessionTurnCount] = useState(0);
   const [actorPrompt, setActorPrompt] = useState<LineReadingResponse["actor_prompt"]>(null);
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
   const [actorText, setActorText] = useState("");
@@ -68,13 +91,18 @@ export default function LineReading() {
   }, [selectedScene]);
 
   const resetSession = useCallback(() => {
+    if (selectedScriptId && sceneId && character) {
+      window.localStorage.removeItem(lineSessionStorageKey(selectedScriptId, sceneId, character, mode));
+    }
     setLineIndex(0);
+    setSessionId("");
+    setSessionTurnCount(0);
     setActorPrompt(null);
     setTranscript([]);
     setActorText("");
     setMessage("");
     setError("");
-  }, []);
+  }, [character, mode, sceneId, selectedScriptId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -127,6 +155,31 @@ export default function LineReading() {
     };
   }, [resetSession, selectedScriptId]);
 
+  useEffect(() => {
+    if (!analysis || !selectedScriptId || !sceneId || !character || sessionId) return;
+    const key = lineSessionStorageKey(selectedScriptId, sceneId, character, mode);
+    const storedSessionId = window.localStorage.getItem(key);
+    if (!storedSessionId) return;
+    let cancelled = false;
+    void getLineReadingSession(analysis.script_id, storedSessionId)
+      .then((session) => {
+        if (cancelled || session.scene_id !== sceneId || session.character !== character || session.mode !== mode) return;
+        setSessionId(session.session_id);
+        setSessionTurnCount(session.turn_count);
+        setLineIndex(session.line_index);
+        setTranscript(session.transcript.map(toTranscriptItem));
+        setActorPrompt(session.actor_prompt);
+        setActorText("");
+        setMessage(`已恢复第 ${session.turn_count} 轮对词会话。`);
+      })
+      .catch(() => {
+        window.localStorage.removeItem(key);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [analysis, character, mode, sceneId, selectedScriptId, sessionId]);
+
   function changeScene(value: string) {
     const nextScene = analysis?.scenes.find((scene) => scene.scene_id === value);
     setSceneId(value);
@@ -144,7 +197,7 @@ export default function LineReading() {
     resetSession();
   }
 
-  async function advance(userText = "", startingIndex?: number, replaceTranscript = false) {
+  async function advance(userText = "", startingIndex?: number, forceNewSession = false) {
     if (!analysis || !selectedScene || !character) return;
     const currentLineIndex = startingIndex ?? lineIndex;
     if (startingIndex === undefined && actorPrompt && !userText.trim()) {
@@ -161,17 +214,12 @@ export default function LineReading() {
         mode,
         line_index: currentLineIndex,
         user_text: userText,
+        session_id: forceNewSession ? undefined : sessionId || undefined,
       });
-      const additions: TranscriptItem[] = [];
-      if (userText.trim()) additions.push({ kind: "actor", character, text: userText.trim() });
-      result.assistant_turns.forEach((turn) => additions.push({
-        kind: "partner",
-        character: turn.character,
-        text: turn.text,
-        sourceLine: turn.source_line,
-      }));
-      if (result.feedback) additions.push({ kind: "feedback", text: result.feedback });
-      setTranscript((current) => replaceTranscript ? additions : [...current, ...additions]);
+      setSessionId(result.session_id);
+      setSessionTurnCount(result.turn_count);
+      window.localStorage.setItem(lineSessionStorageKey(selectedScriptId, selectedScene.scene_id, character, mode), result.session_id);
+      setTranscript(result.transcript.map(toTranscriptItem));
       setActorPrompt(result.actor_prompt);
       setLineIndex(result.next_line_index ?? selectedScene.lines.length);
       setActorText("");
@@ -319,8 +367,9 @@ export default function LineReading() {
             <CardContent className="flex min-h-[680px] flex-col p-4 md:p-5">
               <div className="flex items-start justify-between gap-3 border-b border-border pb-4">
                 <div>
-                  <div className="flex items-center gap-2 text-sm font-semibold"><UserRound size={16} className="text-teal" /> {character || "选择角色"}</div>
-                  <div className="mt-1 text-xs text-dim">{selectedScene ? `第 ${selectedScene.number} 场 · ${selectedScene.title}` : "等待选择场次"}</div>
+                <div className="flex items-center gap-2 text-sm font-semibold"><UserRound size={16} className="text-teal" /> {character || "选择角色"}</div>
+                <div className="mt-1 text-xs text-dim">{selectedScene ? `第 ${selectedScene.number} 场 · ${selectedScene.title}` : "等待选择场次"}</div>
+                {sessionId && <div className="mt-1 text-[10px] text-teal">会话已保存 · 第 {sessionTurnCount} 轮</div>}
                 </div>
                 <div className="rounded-full bg-primary/10 px-2.5 py-1 text-[11px] text-primary">
                   {selectedScene ? `${Math.min(lineIndex + 1, selectedScene.lines.length)} / ${selectedScene.lines.length}` : "0 / 0"}

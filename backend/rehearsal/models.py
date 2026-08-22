@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -455,12 +455,41 @@ class LineReadingRequest(BaseModel):
     mode: Literal["strict", "adaptive"] = "strict"
     line_index: int = Field(default=0, ge=0)
     user_text: str = Field(default="", max_length=20_000)
+    session_id: str | None = Field(default=None, max_length=32)
 
 
 class LineReadingTurn(BaseModel):
     character: str
     text: str
     source_line: int = Field(ge=1)
+
+
+class LineReadingTranscriptItem(BaseModel):
+    """One persisted turn in a role-play session."""
+
+    kind: Literal["partner", "actor", "feedback"]
+    character: str = ""
+    text: str
+    source_line: int | None = Field(default=None, ge=1)
+
+
+class LineReadingSession(BaseModel):
+    """User-scoped state for resuming a line-reading rehearsal."""
+
+    session_id: str
+    script_id: str
+    scene_id: str
+    scene_title: str
+    character: str
+    mode: Literal["strict", "adaptive"]
+    line_index: int = Field(default=0, ge=0)
+    actor_prompt: LineReadingTurn | None = None
+    transcript: list[LineReadingTranscriptItem] = Field(default_factory=list)
+    turn_count: int = Field(default=0, ge=0)
+    engine_counts: dict[str, int] = Field(default_factory=dict)
+    finished: bool = False
+    created_at: str
+    updated_at: str
 
 
 class LineReadingResponse(BaseModel):
@@ -476,6 +505,9 @@ class LineReadingResponse(BaseModel):
     feedback: str = ""
     note: str = ""
     finished: bool = False
+    session_id: str = ""
+    transcript: list[LineReadingTranscriptItem] = Field(default_factory=list)
+    turn_count: int = Field(default=0, ge=0)
 
 
 class RehearsalFeedbackRequest(BaseModel):
@@ -959,6 +991,18 @@ class StageVisualization(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class ScheduleToolCall(BaseModel):
+    """An inspectable tool invocation emitted by the scheduling Agent."""
+
+    call_id: str
+    tool_name: str
+    phase: Literal["inspect", "extract", "group", "assign", "validate"]
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    result: dict[str, Any] = Field(default_factory=dict)
+    status: Literal["completed", "repaired", "failed"] = "completed"
+    summary: str
+
+
 class ScheduleTask(BaseModel):
     task_id: str
     scene_id: str
@@ -981,6 +1025,7 @@ class ScheduleDraft(BaseModel):
     review_status: Literal["pending", "confirmed", "edited"]
     is_preview: bool = False
     tasks: list[ScheduleTask] = Field(default_factory=list)
+    tool_calls: list[ScheduleToolCall] = Field(default_factory=list)
     created_at: str
 
 

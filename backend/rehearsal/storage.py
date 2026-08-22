@@ -12,6 +12,7 @@ from backend.rehearsal.models import (
     AgentRunRecord,
     BudgetLineItem,
     InvoiceRecord,
+    LineReadingSession,
     MottoResponse,
     MusicTimelineNote,
     PromoCopyResponse,
@@ -146,6 +147,35 @@ def delete_schedule(script_id: str, *, user_id: str) -> None:
     path = _schedule_path(user_id, script_id)
     if path.exists():
         path.unlink()
+
+
+def _line_reading_dir(user_id: str) -> Path:
+    path = settings.user_data_dir(user_id) / "rehearsal" / "line-reading-sessions"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _line_reading_path(user_id: str, session_id: str) -> Path:
+    if not _RUN_ID_RE.fullmatch(session_id):
+        raise ValueError("invalid line reading session id")
+    return _line_reading_dir(user_id) / f"{session_id}.json"
+
+
+def save_line_reading_session(session: LineReadingSession, *, user_id: str) -> None:
+    _line_reading_path(user_id, session.session_id).write_text(
+        json.dumps(session.model_dump(mode="json"), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def get_line_reading_session(session_id: str, *, user_id: str) -> LineReadingSession | None:
+    path = _line_reading_path(user_id, session_id)
+    if not path.exists():
+        return None
+    try:
+        return LineReadingSession.model_validate(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, ValueError, TypeError):
+        return None
 
 
 def _availability_path(user_id: str) -> Path:

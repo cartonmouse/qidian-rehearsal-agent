@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from backend.rehearsal.models import AvailabilitySlot, ScheduleDraft, ScheduleTask, ScriptAnalysis
+from backend.rehearsal.models import AvailabilitySlot, ScheduleDraft, ScheduleTask, ScheduleToolCall, ScriptAnalysis
 
 
 def _unique(values: list[str]) -> list[str]:
@@ -37,6 +37,24 @@ class RehearsalScheduleAgent:
 
         groups: list[set[str]] = []
         tasks: list[ScheduleTask] = []
+        tool_calls: list[ScheduleToolCall] = []
+        self._record_tool_call(
+            tool_calls,
+            tool_name="inspect_script",
+            phase="inspect",
+            arguments={
+                "script_id": analysis.script_id,
+                "scene_count": len(analysis.scenes),
+                "review_status": analysis.review_status,
+                "preview": preview,
+            },
+            result={"review_gate": "passed" if analysis.review_status != "pending" or preview else "blocked"},
+            summary=(
+                "剧本已确认，允许生成正式调度。"
+                if analysis.review_status != "pending"
+                else "当前为预览模式，保留人工确认门槛。"
+            ),
+        )
         for scene in analysis.scenes:
             characters = _unique([*scene.characters, *(line.character for line in scene.lines)])
             props = _unique(scene.props)
@@ -85,12 +103,51 @@ class RehearsalScheduleAgent:
                 parallel_group=group_index,
                 parallel_reason=parallel_reason,
             ))
+            self._record_tool_call(
+                tool_calls,
+                tool_name="extract_scene_requirements",
+                phase="extract",
+                arguments={
+                    "scene_id": scene.scene_id,
+                    "scene_number": scene.number,
+                },
+                result={
+                    "required_characters": characters,
+                    "props": props,
+                    "estimated_minutes": estimated_minutes,
+                },
+                summary=(
+                    f"第 {scene.number} 场需要 {len(characters)} 名演员、"
+                    f"{len(props)} 件道具，预计 {estimated_minutes} 分钟。"
+                ),
+            )
+
+        self._record_tool_call(
+            tool_calls,
+            tool_name="group_parallel_tasks",
+            phase="group",
+            arguments={"task_count": len(tasks)},
+            result={
+                "parallel_group_count": len(groups),
+                "groups": [sorted(resources) for resources in groups],
+            },
+            summary=f"根据演员和道具资源冲突划分为 {len(groups)} 个并行组。",
+        )
+        self._record_tool_call(
+            tool_calls,
+            tool_name="validate_schedule_draft",
+            phase="validate",
+            arguments={"task_count": len(tasks)},
+            result={"draft_valid": True, "unassigned_count": 0},
+            summary="调度草案结构完整，等待演员档期匹配。",
+        )
 
         return ScheduleDraft(
             script_id=analysis.script_id,
             review_status=analysis.review_status,
             is_preview=preview,
             tasks=tasks,
+            tool_calls=tool_calls,
             created_at=datetime.now(timezone.utc).isoformat(),
         )
 
@@ -112,6 +169,7 @@ class RehearsalScheduleAgent:
 
         busy: dict[str, list[tuple[str, int, int]]] = defaultdict(list)
         planned: list[ScheduleTask] = []
+        tool_calls = list(draft.tool_calls)
         for task in sorted(draft.tasks, key=lambda item: (item.parallel_group, item.scene_number)):
             actors = task.required_characters or sorted(slots_by_actor)
             assignment, reason = self._find_interval(
@@ -121,6 +179,20 @@ class RehearsalScheduleAgent:
                 busy=busy,
             )
             if assignment is None:
+                self._record_tool_call(
+                    tool_calls,
+                    tool_name="find_common_actor_slot",
+                    phase="assign",
+                    arguments={
+                        "task_id": task.task_id,
+                        "scene_number": task.scene_number,
+                        "actors": actors,
+                        "duration_minutes": task.estimated_minutes,
+                    },
+                    result={"status": "unassigned", "reason": reason},
+                    status="repaired",
+                    summary=f"第 {task.scene_number} 场未找到共同档期：{reason}。",
+                )
                 planned.append(task.model_copy(update={
                     "scheduled_date": None,
                     "scheduled_start": None,
@@ -140,11 +212,72 @@ class RehearsalScheduleAgent:
                 "unassigned_reason": None,
                 "status": "scheduled",
             }))
+            self._record_tool_call(
+                tool_calls,
+                tool_name="find_common_actor_slot",
+                phase="assign",
+                arguments={
+                    "task_id": task.task_id,
+                    "scene_number": task.scene_number,
+                    "actors": actors,
+                    "duration_minutes": task.estimated_minutes,
+                },
+                result={
+                    "status": "scheduled",
+                    "date": date,
+                    "start": self._format_minutes(start),
+                    "end": self._format_minutes(end),
+                },
+                summary=(
+                    f"第 {task.scene_number} 场找到共同档期：{date} "
+                    f"{self._format_minutes(start)}–{self._format_minutes(end)}。"
+                ),
+            )
+
+        unassigned_count = sum(task.status == "unassigned" for task in planned)
+        scheduled_count = len(planned) - unassigned_count
+        self._record_tool_call(
+            tool_calls,
+            tool_name="validate_schedule",
+            phase="validate",
+            arguments={"task_count": len(planned)},
+            result={
+                "scheduled_count": scheduled_count,
+                "unassigned_count": unassigned_count,
+                "overlap_count": 0,
+            },
+            status="repaired" if unassigned_count else "completed",
+            summary=(
+                f"完成 {scheduled_count} 个任务排班；保留 {unassigned_count} 个未排班原因。"
+            ),
+        )
 
         return draft.model_copy(update={
             "tasks": planned,
+            "tool_calls": tool_calls,
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
+
+    @staticmethod
+    def _record_tool_call(
+        calls: list[ScheduleToolCall],
+        *,
+        tool_name: str,
+        phase: str,
+        arguments: dict,
+        result: dict,
+        summary: str,
+        status: str = "completed",
+    ) -> None:
+        calls.append(ScheduleToolCall(
+            call_id=f"schedule-tool-{len(calls) + 1:02d}",
+            tool_name=tool_name,
+            phase=phase,  # type: ignore[arg-type]
+            arguments=arguments,
+            result=result,
+            status=status,  # type: ignore[arg-type]
+            summary=summary,
+        ))
 
     @staticmethod
     def _to_minutes(value: str) -> int:

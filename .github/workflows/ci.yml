@@ -34,6 +34,9 @@ jobs:
       - name: Run rehearsal regression
         run: python -c "import tests.test_rehearsal_agent as t; [getattr(t, n)() for n in dir(t) if n.startswith('test_')]"
 
+      - name: Run deterministic Agent evals
+        run: python -m evals.run_rehearsal_evals
+
   frontend:
     name: Frontend checks
     runs-on: ubuntu-latest

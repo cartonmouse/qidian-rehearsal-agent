@@ -288,11 +288,22 @@ export interface ScheduleTask {
   status: "draft" | "scheduled" | "unassigned";
 }
 
+export interface ScheduleToolCall {
+  call_id: string;
+  tool_name: string;
+  phase: "inspect" | "extract" | "group" | "assign" | "validate";
+  arguments: Record<string, unknown>;
+  result: Record<string, unknown>;
+  status: "completed" | "repaired" | "failed";
+  summary: string;
+}
+
 export interface ScheduleDraft {
   script_id: string;
   review_status: "pending" | "confirmed" | "edited";
   is_preview: boolean;
   tasks: ScheduleTask[];
+  tool_calls: ScheduleToolCall[];
   created_at: string;
 }
 
@@ -424,6 +435,30 @@ export interface LineReadingTurn {
   source_line: number;
 }
 
+export interface LineReadingTranscriptItem {
+  kind: "partner" | "actor" | "feedback";
+  character: string;
+  text: string;
+  source_line: number | null;
+}
+
+export interface LineReadingSession {
+  session_id: string;
+  script_id: string;
+  scene_id: string;
+  scene_title: string;
+  character: string;
+  mode: "strict" | "adaptive";
+  line_index: number;
+  actor_prompt: LineReadingTurn | null;
+  transcript: LineReadingTranscriptItem[];
+  turn_count: number;
+  engine_counts: Record<string, number>;
+  finished: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface LineReadingResponse {
   script_id: string;
   scene_id: string;
@@ -437,6 +472,9 @@ export interface LineReadingResponse {
   feedback: string;
   note: string;
   finished: boolean;
+  session_id: string;
+  transcript: LineReadingTranscriptItem[];
+  turn_count: number;
 }
 
 export interface RehearsalFeedback {
@@ -857,6 +895,7 @@ export async function readLine(
     mode: "strict" | "adaptive";
     line_index: number;
     user_text?: string;
+    session_id?: string;
   },
 ): Promise<LineReadingResponse> {
   const response = await authFetch(`/api/rehearsal/scripts/${encodeURIComponent(scriptId)}/line-reading`, {
@@ -865,6 +904,12 @@ export async function readLine(
     body: JSON.stringify(payload),
   });
   await ensureOk(response);
+  return response.json();
+}
+
+export async function getLineReadingSession(scriptId: string, sessionId: string): Promise<LineReadingSession> {
+  const response = await authFetch(`/api/rehearsal/scripts/${encodeURIComponent(scriptId)}/line-reading/sessions/${encodeURIComponent(sessionId)}`);
+  await ensureOk(response, "对词会话加载失败");
   return response.json();
 }
 

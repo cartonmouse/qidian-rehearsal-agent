@@ -11,7 +11,7 @@ from backend.llm_provider import ChatLLM
 from backend.rehearsal.agent import ScriptAnalysisAgent
 from backend.rehearsal.feedback_agent import RehearsalMirrorAgent
 from backend.rehearsal.finance_agent import ResourceFinanceAgent
-from backend.rehearsal.line_reading import LineReadingAgent
+from backend.rehearsal.line_reading import LineReadingAgent, LineReadingSessionAgent
 from backend.rehearsal.logbook_agent import RehearsalLogAgent
 from backend.rehearsal.metrics_agent import RehearsalMetricsAgent
 from backend.rehearsal.motto_agent import MottoAgent
@@ -216,6 +216,42 @@ def test_schedule_agent_keeps_same_actor_tasks_non_overlapping():
     ]
 
 
+def test_schedule_agent_exposes_an_inspectable_tool_call_workflow():
+    analysis = ScriptAnalysisAgent().run(
+        title="工具调用测试",
+        version_label="v1",
+        script_text="第一场\n小林：我们开始。\n第二场\n小林：继续。",
+        script_id="tool-workflow",
+        analysis_mode="rules",
+    ).model_copy(update={"review_status": "confirmed"})
+
+    agent = RehearsalScheduleAgent()
+    draft = agent.run(analysis, default_minutes=45)
+    assert [call.tool_name for call in draft.tool_calls] == [
+        "inspect_script",
+        "extract_scene_requirements",
+        "extract_scene_requirements",
+        "group_parallel_tasks",
+        "validate_schedule_draft",
+    ]
+    assert draft.tool_calls[0].result["review_gate"] == "passed"
+    assert draft.tool_calls[1].result["required_characters"] == ["小林"]
+
+    planned = agent.assign(draft, [
+        AvailabilitySlot(actor="小林", date="2026-08-25", start="19:00", end="21:00"),
+    ])
+    assert [call.tool_name for call in planned.tool_calls[-3:]] == [
+        "find_common_actor_slot",
+        "find_common_actor_slot",
+        "validate_schedule",
+    ]
+    assert planned.tool_calls[-1].result == {
+        "scheduled_count": 2,
+        "unassigned_count": 0,
+        "overlap_count": 0,
+    }
+
+
 def test_line_reading_follows_selected_role_and_source_lines():
     analysis = ScriptAnalysisAgent().run(
         title="对词测试",
@@ -263,6 +299,45 @@ def test_line_reading_adaptive_mode_degrades_to_original_line_without_llm():
     assert response.engine == "fallback"
     assert response.assistant_turns[0].text == "你终于来了。"
     assert "回退到原词" in response.note
+
+
+def test_line_reading_session_agent_persists_cursor_transcript_and_ignores_stale_index():
+    analysis = ScriptAnalysisAgent().run(
+        title="会话对词",
+        version_label="v1",
+        script_text="第一场\n导演：准备。\n小林：我来了。\n导演：开始。",
+        script_id="line-session",
+        analysis_mode="rules",
+    )
+    agent = LineReadingSessionAgent()
+
+    first, session = agent.advance(
+        analysis,
+        LineReadingRequest(scene_id="scene-1", character="小林", mode="strict"),
+    )
+    assert first.session_id == session.session_id
+    assert first.turn_count == 1
+    assert session.line_index == 1
+    assert session.actor_prompt is not None
+    assert session.transcript[0].kind == "partner"
+
+    second, finished = agent.advance(
+        analysis,
+        LineReadingRequest(
+            scene_id="scene-1",
+            character="小林",
+            mode="strict",
+            line_index=99,
+            user_text="我来了。",
+            session_id=session.session_id,
+        ),
+        session=session,
+    )
+    assert second.finished is True
+    assert finished.line_index == 3
+    assert finished.turn_count == 2
+    assert [item.kind for item in finished.transcript] == ["partner", "actor", "partner", "feedback"]
+    assert second.transcript == finished.transcript
 
 
 def test_rehearsal_mirror_keeps_raw_notes_and_structures_feedback_without_llm():
@@ -1115,3 +1190,13 @@ def test_resource_audit_storage_is_user_scoped_and_keeps_latest_first():
             assert list_resource_audits(user_id="actor-b") == []
         finally:
             settings.base_dir = original_base_dir
+
+
+def test_rehearsal_agent_eval_set_is_reproducible_without_provider_keys():
+    from evals.run_rehearsal_evals import evaluate_cases
+
+    report = evaluate_cases()
+
+    assert report["total"] == 7
+    assert report["failed"] == 0
+    assert report["pass_rate"] == 100.0

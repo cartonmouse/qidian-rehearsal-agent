@@ -16,7 +16,7 @@ from backend.auth import get_current_user
 from backend.rehearsal.agent import ScriptAnalysisAgent
 from backend.rehearsal.feedback_agent import RehearsalMirrorAgent
 from backend.rehearsal.finance_agent import ResourceFinanceAgent
-from backend.rehearsal.line_reading import LineReadingAgent
+from backend.rehearsal.line_reading import LineReadingSessionAgent
 from backend.rehearsal.logbook_agent import RehearsalLogAgent
 from backend.rehearsal.metrics_agent import RehearsalMetricsAgent
 from backend.rehearsal.motto_agent import MottoAgent
@@ -65,6 +65,7 @@ from backend.rehearsal.models import (
     ScriptAnalysis,
     LineReadingRequest,
     LineReadingResponse,
+    LineReadingSession,
     MottoRequest,
     MottoResponse,
     MottoUpdateRequest,
@@ -87,6 +88,7 @@ from backend.rehearsal.storage import (
     get_feedback,
     get_inventory,
     get_invoices,
+    get_line_reading_session,
     get_motto,
     get_music_notes,
     get_schedule,
@@ -109,6 +111,7 @@ from backend.rehearsal.storage import (
     save_budget_items,
     save_script,
     save_invoices,
+    save_line_reading_session,
     save_music_notes,
     delete_room_booking,
     delete_log,
@@ -869,7 +872,16 @@ def line_reading(
         raise HTTPException(404, "剧本解析结果不存在")
     started = perf_counter()
     try:
-        response = LineReadingAgent().respond(analysis, request, user_id=user_id)
+        session = get_line_reading_session(request.session_id, user_id=user_id) if request.session_id else None
+        if request.session_id and session is None:
+            raise ValueError("对词会话不存在，请重新开始当前场次")
+        response, updated_session = LineReadingSessionAgent().advance(
+            analysis,
+            request,
+            session=session,
+            user_id=user_id,
+        )
+        save_line_reading_session(updated_session, user_id=user_id)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     warnings = [response.note] if response.engine == "fallback" and response.note else []
@@ -913,6 +925,22 @@ def line_reading(
         duration_ms=_elapsed_ms(started),
     )
     return response
+
+
+@router.get("/scripts/{script_id}/line-reading/sessions/{session_id}", response_model=LineReadingSession)
+def read_line_reading_session(
+    script_id: str,
+    session_id: str,
+    user_id: str = Depends(get_current_user),
+):
+    """Resume a user-scoped line-reading cursor and transcript."""
+    try:
+        session = get_line_reading_session(session_id, user_id=user_id)
+    except ValueError:
+        raise HTTPException(400, "无效的对词会话 ID")
+    if session is None or session.script_id != script_id:
+        raise HTTPException(404, "对词会话不存在")
+    return session
 
 
 @router.post("/feedback", response_model=RehearsalFeedbackResponse)

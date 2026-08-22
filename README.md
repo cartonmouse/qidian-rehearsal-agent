@@ -34,9 +34,11 @@
 
 每个调度任务还会记录并展示分组原因：没有共同演员或道具资源的场次可以进入同一并行组；发生冲突时列出共享资源，便于导演解释为什么任务需要错开。
 
+调度 Agent 还会返回可审计的工具调用链：`inspect_script` 检查人工确认门槛，`extract_scene_requirements` 提取演员/道具/时长，`group_parallel_tasks` 划分并行组，`find_common_actor_slot` 查找共同档期，最后由 `validate_schedule` 校验已排、未排和冲突数量。工作台会同时展示每次调用的参数摘要、结果和降级状态。
+
 档期导入兼容 Excel、WPS 和 Google Sheets 导出的表格。前端提供模板下载、行级格式校验和导入预览，也兼容制表符或竖线分隔的粘贴内容；确认预览后点击“保存档期”，时间池即可被不同剧本重复使用。
 
-第一版对词 Agent 已接入侧栏“对词训练”：可以选择剧本、场次和角色，按“原词模式”逐句练习，也可以选择“适应性模式”让 LLM 根据演员临场表达生成对方回应。原词模式不需要模型服务；适应性模式在 LLM 未配置或调用失败时自动回退到原台词，并保留来源行号。
+第一版对词 Agent 已接入侧栏“对词训练”：可以选择剧本、场次和角色，按“原词模式”逐句练习，也可以选择“适应性模式”让 LLM 根据演员临场表达生成对方回应。原词模式不需要模型服务；适应性模式在 LLM 未配置或调用失败时自动回退到原台词，并保留来源行号。对词会话现在由后端保存游标、完整 transcript、引擎统计和下一句原词，前端刷新后可以恢复上次会话；后端不会信任客户端跳跃提交的 `line_index`。
 
 排练复盘已经接入侧栏“排练复盘”：一次排练可以独立记录日期、参与者、具体产出和原始反馈；镜子 Agent 会生成总结、已形成的亮点、待解决的阻塞项和下一步动作。它支持本地规则、LLM 和无模型降级三种路径，并完整保留原始笔记。
 
@@ -60,6 +62,8 @@
 
 Agent 运行记录已经接入侧栏“Agent运行记录”：剧本解析、调度草案、自动排班、对词、资源检查和剧本问答都会保存结构化摘要、运行模式、步骤 trace、耗时和降级原因；页面额外聚合最近 30 天的失败率、降级率、按 Agent 统计和 failed step。LLM 调用只对连接超时、限流和 5xx 等可重试错误最多尝试 2 次，业务写入不自动重试。
 
+Agent 评估集已经接入仓库：`evals/rehearsal_cases.json` 覆盖剧本解析、可行排班、调度工具调用链、未排班原因、资源状态、带证据/拒答的 RAG 路径和对词会话恢复；`python -m evals.run_rehearsal_evals` 可以在没有模型服务的情况下输出逐项 JSON 报告，后端回归测试和 CI 会执行同一套评估。
+
 演员可用时间现在作为独立的“演员时间池”保存，不要求先解析剧本；排班 Agent 在生成任务后读取这组可复用档期。工作台仍提供“预览调度（未确认）”入口，方便先观察结果，再决定是否进行人工确认。
 
 前端侧栏目前聚焦剧团使用场景：`排练工作台`负责剧本解析与人工确认，`演员排练表`负责独立维护演员档期、生成场次任务和自动排班，`对词训练`负责逐句排练，`排练复盘`负责反馈归档，`排练度量`负责聚合进度信号，`场记档案`负责现场知识沉淀，`建议收件箱`负责演员意见流转，`知识资产`负责格言沉淀和宣传文案生成，`版本追踪`负责版本差异核对，`舞台可视化`负责走位和上下场核对，`资源管理`负责库存、排练室和排练前资源检查，`音乐与预算`负责配乐时间轴、预算和发票元数据。原项目的面试训练类入口已从主导航移除，相关旧路由暂时保留以避免破坏基础项目代码。
@@ -77,6 +81,10 @@ Agent 运行记录已经接入侧栏“Agent运行记录”：剧本解析、调
 - 已完成：版本差异下游影响提醒，支持调度、对词和资源复核入口
 - 已完成：资源变更审计、Agent 失败指标和有上限的 LLM 重试可观测性
 - 已完成：资源审计与版本复核动作串联，资源时间线支持类型、变更动作和关键词筛选
+- 已完成：无外部 API 依赖的 Agent 评估集，覆盖解析、排班、资源检查和 RAG 证据回指
+- 已完成：调度 Agent 工具调用序列、参数/结果展示，以及对词 Agent 的持久化会话游标和 transcript
+- 已完成：评估集覆盖调度工具调用链与对词会话恢复边界
+- 待继续：补充更多真实剧本样本和 LLM mock 合同评估，并完善多 Agent 之间的运行轨迹关联
 
 ## 技术栈
 
@@ -105,6 +113,7 @@ npm run dev
 示例剧本位于 [`docs/examples/qidian-demo-script.md`](docs/examples/qidian-demo-script.md)。
 演员档期示例位于 [`docs/examples/qidian-actor-availability.csv`](docs/examples/qidian-actor-availability.csv)。
 完整演示步骤、面试讲解话术和提交前验证清单位于 [`docs/demo-and-interview.md`](docs/demo-and-interview.md)。
+Agent 评估集说明和面试讲解要点位于 [`docs/agent-evaluation.md`](docs/agent-evaluation.md)。
 完整环境变量、Docker 和线上安全注意事项见 [`docs/deployment.md`](docs/deployment.md)。
 提交到 GitHub 后，`.github/workflows/ci.yml` 会自动执行后端回归、前端类型/单测/lint/build 和 Docker Compose 配置检查。
 
@@ -123,6 +132,7 @@ npm run dev
 - `GET /api/rehearsal/scripts/{script_id}/schedule`：读取最近一次调度草案
 - `POST /api/rehearsal/scripts/{script_id}/schedule/plan`：根据演员可用时间生成自动排班结果
 - `POST /api/rehearsal/scripts/{script_id}/line-reading`：推进一轮角色对词；支持 `strict` 和 `adaptive` 模式
+- `GET /api/rehearsal/scripts/{script_id}/line-reading/sessions/{session_id}`：恢复当前用户的对词游标、transcript 和下一句原词
 - `POST /api/rehearsal/scripts/{script_id}/rag`：在当前剧本版本内检索证据并回答问题；支持 `rules`/`semantic` 检索和 `auto`/`rules`/`llm` 回答
 - `GET /api/rehearsal/agent-runs?limit=50`：读取当前用户最近的 Agent 运行摘要和结构化 trace
 - `GET /api/rehearsal/agent-runs/{run_id}`：读取单次 Agent 运行详情

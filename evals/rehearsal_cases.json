@@ -1,0 +1,155 @@
+[
+  {
+    "id": "script-analysis-basic",
+    "kind": "script_analysis",
+    "title": "轨道之外",
+    "version_label": "eval-v1",
+    "script_path": "docs/examples/qidian-demo-script.md",
+    "analysis_mode": "rules",
+    "expected": {
+      "analysis_mode": "deterministic",
+      "scene_numbers": [1, 2],
+      "character_names": ["导演", "小林", "许教授", "小周"],
+      "props_include": ["椅子", "手电筒", "信封", "纸条", "手机"],
+      "trace_steps": ["ingest", "split_scenes", "extract_entities_parallel", "validate", "repair"],
+      "all_source_lines_valid": true
+    }
+  },
+  {
+    "id": "schedule-feasible",
+    "kind": "schedule",
+    "title": "轨道之外",
+    "version_label": "eval-v1",
+    "script_path": "docs/examples/qidian-demo-script.md",
+    "analysis_mode": "rules",
+    "review_status": "confirmed",
+    "default_minutes": 45,
+    "slots": [
+      {"actor": "导演", "date": "2026-08-25", "start": "19:00", "end": "21:00"},
+      {"actor": "小林", "date": "2026-08-25", "start": "19:00", "end": "21:00"},
+      {"actor": "许教授", "date": "2026-08-25", "start": "19:00", "end": "21:00"},
+      {"actor": "小周", "date": "2026-08-25", "start": "19:00", "end": "21:00"}
+    ],
+    "expected": {
+      "task_count": 2,
+      "scheduled_count": 2,
+      "unassigned_count": 0,
+      "parallel_groups": [1, 2],
+      "tool_names": [
+        "inspect_script",
+        "extract_scene_requirements",
+        "extract_scene_requirements",
+        "group_parallel_tasks",
+        "validate_schedule_draft",
+        "find_common_actor_slot",
+        "find_common_actor_slot",
+        "validate_schedule"
+      ],
+      "first_task_end_equals_second_start": true,
+      "second_task_reason_contains": "共享资源"
+    }
+  },
+  {
+    "id": "schedule-unassigned",
+    "kind": "schedule",
+    "title": "轨道之外",
+    "version_label": "eval-v1",
+    "script_path": "docs/examples/qidian-demo-script.md",
+    "analysis_mode": "rules",
+    "review_status": "confirmed",
+    "default_minutes": 45,
+    "slots": [
+      {"actor": "导演", "date": "2026-08-25", "start": "19:00", "end": "20:00"},
+      {"actor": "小林", "date": "2026-08-25", "start": "19:00", "end": "20:00"},
+      {"actor": "许教授", "date": "2026-08-25", "start": "20:00", "end": "21:00"},
+      {"actor": "小周", "date": "2026-08-25", "start": "19:00", "end": "20:00"}
+    ],
+    "expected": {
+      "task_count": 2,
+      "scheduled_count": 0,
+      "unassigned_count": 2,
+      "unassigned_reason_contains": "没有共同"
+    }
+  },
+  {
+    "id": "resource-check-scene",
+    "kind": "resource_check",
+    "title": "轨道之外",
+    "version_label": "eval-v1",
+    "script_path": "docs/examples/qidian-demo-script.md",
+    "analysis_mode": "rules",
+    "scene_number": 1,
+    "inventory": [
+      {"resource_id": "chair-eval", "category": "prop", "name": "椅子", "quantity": 1, "status": "available"},
+      {"resource_id": "flashlight-eval", "category": "prop", "name": "手电筒", "quantity": 1, "status": "maintenance"}
+    ],
+    "expected": {
+      "status_by_name": {
+        "椅子": "ready",
+        "手电筒": "maintenance",
+        "信封": "missing"
+      },
+      "ready_count": 1,
+      "requirement_note_by_name": {
+        "信封": "库存中没有匹配记录",
+        "手电筒": "维修中"
+      }
+    }
+  },
+  {
+    "id": "rag-evidence-and-no-hallucination",
+    "kind": "rag",
+    "title": "轨道之外",
+    "version_label": "eval-v1",
+    "script_path": "docs/examples/qidian-demo-script.md",
+    "analysis_mode": "rules",
+    "question": "第一场小林拿起了什么？",
+    "answer_mode": "rules",
+    "retrieval_mode": "rules",
+    "expected": {
+      "engine": "rules",
+      "retrieval_engine": "rules",
+      "evidence_text_contains": ["手电筒"],
+      "evidence_count_min": 1,
+      "all_source_lines_valid": true,
+      "answer_contains_evidence_id": true
+    }
+  },
+  {
+    "id": "rag-empty-stops-guessing",
+    "kind": "rag",
+    "title": "无证据短场",
+    "version_label": "eval-v1",
+    "script_text": "第一场\n小林：请把椅子放到这里。",
+    "analysis_mode": "rules",
+    "question": "火车站的灯光颜色是什么？",
+    "answer_mode": "auto",
+    "retrieval_mode": "rules",
+    "expected": {
+      "engine": "rules",
+      "retrieval_engine": "rules",
+      "evidence_count": 0,
+      "answer_contains": "没有检索到"
+    }
+  },
+  {
+    "id": "line-reading-session-resume",
+    "kind": "line_reading_session",
+    "title": "会话对词",
+    "version_label": "eval-v1",
+    "script_text": "第一场\n导演：准备。\n小林：我来了。\n导演：开始。",
+    "analysis_mode": "rules",
+    "scene_id": "scene-1",
+    "character": "小林",
+    "mode": "strict",
+    "expected": {
+      "first_engine": "strict",
+      "first_turn_count": 1,
+      "second_finished": true,
+      "second_line_index": 3,
+      "transcript_kinds": ["partner", "actor", "partner", "feedback"],
+      "session_id_stable": true,
+      "source_lines_valid": true
+    }
+  }
+]

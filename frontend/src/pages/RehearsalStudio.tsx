@@ -7,6 +7,7 @@ import {
   Download,
   FileUp,
   Layers3,
+  ListChecks,
   Loader2,
   Orbit,
   Package,
@@ -29,6 +30,7 @@ import {
   type SceneReviewPatch,
   type ScriptAnalysis,
   type ScheduleDraft,
+  type ScheduleToolCall,
 } from "@/api/rehearsal";
 import {
   formatAvailabilityCsv,
@@ -87,6 +89,45 @@ const REVIEW_STATUS_LABELS: Record<ScriptAnalysis["review_status"], string> = {
   confirmed: "已确认",
   edited: "已人工修改",
 };
+
+const SCHEDULE_TOOL_LABELS: Record<string, string> = {
+  inspect_script: "检查确认门槛",
+  extract_scene_requirements: "提取场次需求",
+  group_parallel_tasks: "划分并行任务",
+  validate_schedule_draft: "校验调度草案",
+  find_common_actor_slot: "查找共同档期",
+  validate_schedule: "校验排班结果",
+};
+
+const SCHEDULE_TOOL_PHASE_LABELS: Record<ScheduleToolCall["phase"], string> = {
+  inspect: "检查",
+  extract: "提取",
+  group: "分组",
+  assign: "排班",
+  validate: "校验",
+};
+
+function formatScheduleToolResult(call: ScheduleToolCall): string {
+  const result = call.result;
+  if (call.tool_name === "find_common_actor_slot") {
+    if (result.status === "scheduled") {
+      return `${String(result.date)} · ${String(result.start)}–${String(result.end)}`;
+    }
+    return String(result.reason || "保留未排班状态");
+  }
+  if (call.tool_name === "group_parallel_tasks") {
+    return `${String(result.parallel_group_count || 0)} 个并行组`;
+  }
+  if (call.tool_name === "validate_schedule") {
+    return `已排 ${String(result.scheduled_count || 0)} · 未排 ${String(result.unassigned_count || 0)} · 冲突 ${String(result.overlap_count || 0)}`;
+  }
+  if (call.tool_name === "extract_scene_requirements") {
+    const characters = Array.isArray(result.required_characters) ? result.required_characters.length : 0;
+    const props = Array.isArray(result.props) ? result.props.length : 0;
+    return `${characters} 名演员 · ${props} 件道具 · ${String(result.estimated_minutes || 0)} 分钟`;
+  }
+  return result.review_gate === "passed" ? "确认门槛通过" : call.tool_name === "inspect_script" ? "仅允许预览" : "结构校验通过";
+}
 
 function splitLabels(value: string): string[] {
   return value
@@ -663,7 +704,32 @@ export default function RehearsalStudio() {
                         <div className="flex flex-wrap gap-2 text-[11px] text-dim">
                           <span className="rounded-full bg-primary/10 px-2.5 py-1 text-primary">{schedule.tasks.length} 个场次任务</span>
                           <span className="rounded-full bg-teal/10 px-2.5 py-1 text-teal">{new Set(schedule.tasks.map((task) => task.parallel_group)).size} 个并行组</span>
+                          <span className="rounded-full bg-orange/10 px-2.5 py-1 text-orange">{schedule.tool_calls?.length ?? 0} 次工具调用</span>
                         </div>
+                        {(schedule.tool_calls?.length ?? 0) > 0 && (
+                          <div className="rounded-xl border border-border bg-background/35 p-3">
+                            <div className="flex items-center gap-2 text-xs font-semibold">
+                              <ListChecks size={15} className="text-primary" />
+                              调度 Agent 工具调用链
+                              <span className="text-[10px] font-normal text-dim">每一步都保留参数结果和解释</span>
+                            </div>
+                            <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                              {schedule.tool_calls.map((call, index) => (
+                                <div key={call.call_id} className="rounded-lg border border-border/80 bg-background/50 px-2.5 py-2">
+                                  <div className="flex items-center gap-2 text-[11px]">
+                                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/12 font-mono text-[10px] text-primary">{String(index + 1).padStart(2, "0")}</span>
+                                    <span className="font-semibold">{SCHEDULE_TOOL_LABELS[call.tool_name] || call.tool_name}</span>
+                                    <span className="ml-auto rounded-full bg-hover px-1.5 py-0.5 text-[10px] text-dim">{SCHEDULE_TOOL_PHASE_LABELS[call.phase]}</span>
+                                  </div>
+                                  <div className="mt-1.5 text-[11px] leading-5 text-dim">{call.summary}</div>
+                                  <div className={cn("mt-1 text-[10px]", call.status === "repaired" ? "text-orange" : call.status === "failed" ? "text-red" : "text-teal")}>
+                                    结果：{formatScheduleToolResult(call)}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                         <div className="grid gap-2 md:grid-cols-2">
                           {schedule.tasks.map((task) => (
                             <div key={task.task_id} className="rounded-xl border border-border bg-background/45 p-3">
