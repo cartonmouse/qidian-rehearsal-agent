@@ -1,0 +1,12 @@
+__pycache__
+*.pyc
+.env
+frontend/node_modules
+frontend/dist
+data/models
+data/interviews.db
+data/.index_cache
+data/resume
+data/user_profile
+images
+.git

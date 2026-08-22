@@ -1,0 +1,62 @@
+{
+  "java": {
+    "name": "Java",
+    "icon": "Cpu",
+    "dir": "01_Java"
+  },
+  "python": {
+    "name": "Python",
+    "icon": "Terminal",
+    "dir": "02_Python"
+  },
+  "javascript": {
+    "name": "JavaScript",
+    "icon": "Zap",
+    "dir": "03_JavaScript"
+  },
+  "go": {
+    "name": "Go",
+    "icon": "Rocket",
+    "dir": "04_Go"
+  },
+  "algorithms": {
+    "name": "数据结构与算法",
+    "icon": "Code",
+    "dir": "05_Algorithms"
+  },
+  "sql": {
+    "name": "SQL",
+    "icon": "Database",
+    "dir": "06_SQL"
+  },
+  "react": {
+    "name": "React",
+    "icon": "Blocks",
+    "dir": "07_React"
+  },
+  "spring": {
+    "name": "Spring",
+    "icon": "Layers",
+    "dir": "08_Spring"
+  },
+  "rag": {
+    "name": "RAG",
+    "icon": "Library",
+    "dir": "09_RAG"
+  },
+  "agent": {
+    "name": "Agent",
+    "icon": "Bot",
+    "dir": "10_Agent"
+  },
+  "middleware_distributed": {
+    "name": "中间件与分布式",
+    "icon": "Network",
+    "dir": "11_Middleware_Distributed"
+  },
+  "microservices": {
+    "name": "微服务",
+    "icon": "Workflow",
+    "dir": "12_Microservices"
+  }
+}

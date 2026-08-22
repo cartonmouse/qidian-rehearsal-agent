@@ -1,0 +1,51 @@
+# Secrets
+.env
+1.txt
+# Python
+__pycache__/
+*.pyc
+VoiceWings-master/
+
+# Node(任意层级)
+node_modules/
+package-lock.json
+!frontend/package-lock.json
+frontend/dist/
+demo_imges/
+# 生成素材原图/草稿目录，最终优化版已放进 frontend/src/assets/
+images/images2/
+
+# User data (personal, not for sharing)
+data/users/
+data/resume/*
+data/user_profile/*
+data/user_profile/insights/*
+data/knowledge/**/*.md
+data/high_freq/*
+data/topics.json
+!data/resume/.gitkeep
+!data/user_profile/.gitkeep
+!data/high_freq/.gitkeep
+data/interviews.db
+data/langgraph_checkpoints.sqlite
+# SQLite WAL mode 运行时的 journal 文件，和 *.sqlite/*.db 一起出现
+*.sqlite-wal
+*.sqlite-shm
+*.db-wal
+*.db-shm
+
+# Generated / cache
+.pytest_cache/
+data/.index_cache/
+data/models/
+.DS_Store
+llm.md
+
+
+local_tools/
+
+# Internal design docs
+design/
+
+# Claude Code local state (worktrees, settings)
+.claude/
