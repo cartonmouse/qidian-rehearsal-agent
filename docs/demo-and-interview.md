@@ -26,7 +26,7 @@ npm run dev
 
 ## 二、8 分钟完整演示
 
-建议使用仓库内的示例剧本 [`docs/examples/qidian-demo-script.md`](examples/qidian-demo-script.md) 和演员档期 [`docs/examples/qidian-actor-availability.csv`](examples/qidian-actor-availability.csv)。
+建议使用仓库内的示例剧本 [`docs/examples/qidian-demo-script.md`](examples/qidian-demo-script.md) 或 [`docs/examples/qidian-echo-room-script.md`](examples/qidian-echo-room-script.md)，以及演员档期 [`docs/examples/qidian-actor-availability.csv`](examples/qidian-actor-availability.csv)。
 
 ### 1. 剧本解析与人工确认
 
@@ -143,7 +143,7 @@ CRUD 负责保存剧本、档期和记录；Agent 负责把非结构化输入变
 
 ### 目前最值得继续做什么？
 
-当前版本已经有核心 Agent 的用户隔离运行记录、版本变化下游提醒、资源变更审计、可筛选审计时间线、调度工具阶段/结果合同、调度/排班父子 Run、冲突替代方案、批量排班确认及重复提交拒绝、对词会话状态、角色语气/上下文记忆，以及真实样本上的 LLM mock 合同评估。下一步更值得做的是增加更多剧本样本，并继续补充跨日期资源约束样本。
+当前版本已经有核心 Agent 的用户隔离运行记录、版本变化下游提醒、资源变更审计、可筛选审计时间线、调度工具阶段/结果合同、调度/排班父子 Run、冲突替代方案、批量排班确认及重复提交拒绝、对词会话状态、角色语气/上下文记忆，以及两份原创样本上的 LLM mock 合同评估。下一步更值得做的是增加更多剧本样本，并把排练室等外部资源纳入跨场次约束。
 
 ## 五、验证清单
 

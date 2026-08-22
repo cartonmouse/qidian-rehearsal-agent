@@ -1478,6 +1478,6 @@ def test_rehearsal_agent_eval_set_is_reproducible_without_provider_keys():
 
     report = evaluate_cases()
 
-    assert report["total"] == 9
+    assert report["total"] == 11
     assert report["failed"] == 0
     assert report["pass_rate"] == 100.0

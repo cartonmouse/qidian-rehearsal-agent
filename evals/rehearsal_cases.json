@@ -98,6 +98,53 @@
     }
   },
   {
+    "id": "script-analysis-echo-room",
+    "kind": "script_analysis",
+    "title": "回声室",
+    "version_label": "eval-v1",
+    "script_path": "docs/examples/qidian-echo-room-script.md",
+    "analysis_mode": "rules",
+    "expected": {
+      "analysis_mode": "deterministic",
+      "scene_numbers": [1, 2],
+      "character_names": ["导演", "林澄", "顾言"],
+      "props_include": ["椅子", "桌子", "手机", "钥匙"],
+      "trace_steps": ["ingest", "split_scenes", "extract_entities_parallel", "validate", "repair"],
+      "all_source_lines_valid": true
+    }
+  },
+  {
+    "id": "schedule-cross-date-resource",
+    "kind": "schedule",
+    "title": "回声室",
+    "version_label": "eval-v1",
+    "script_path": "docs/examples/qidian-echo-room-script.md",
+    "analysis_mode": "rules",
+    "review_status": "confirmed",
+    "default_minutes": 45,
+    "slots": [
+      {"actor": "林澄", "date": "2026-08-25", "start": "19:00", "end": "21:00"},
+      {"actor": "顾言", "date": "2026-08-25", "start": "19:00", "end": "21:00"},
+      {"actor": "导演", "date": "2026-08-25", "start": "19:00", "end": "21:00"}
+    ],
+    "expected": {
+      "task_count": 2,
+      "scheduled_count": 2,
+      "unassigned_count": 0,
+      "parallel_groups": [1, 2],
+      "first_task_end_equals_second_start": true,
+      "second_task_reason_contains": "共享资源",
+      "batch_override": {
+        "items": [
+          {"date": "2026-08-26", "start": "19:00", "end": "19:45"},
+          {"date": "2026-08-27", "start": "19:00", "end": "19:45"}
+        ],
+        "count": 2,
+        "repeat_error_contains": "批量重复提交被拒绝"
+      }
+    }
+  },
+  {
     "id": "schedule-unassigned",
     "kind": "schedule",
     "title": "轨道之外",

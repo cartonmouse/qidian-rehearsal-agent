@@ -87,7 +87,7 @@ Agent 评估集已经接入仓库：`evals/rehearsal_cases.json` 覆盖剧本解
 - 已完成：调度草案与自动排班共享根 Run，并在 Agent运行记录页展示关联运行链
 - 已完成：无共同档期时的分组/缩短/补档建议，以及导演人工覆盖排班
 - 已完成：批量排班确认、原子写入和共享资源冲突校验
-- 待继续：补充更多真实剧本样本，并继续完善批量确认的跨日期资源约束样本
+- 待继续：补充更多真实剧本样本，并继续完善排练室等外部资源的跨场次约束样本
 
 ## 技术栈
 
@@ -113,7 +113,7 @@ npm install
 npm run dev
 ```
 
-示例剧本位于 [`docs/examples/qidian-demo-script.md`](docs/examples/qidian-demo-script.md)。
+示例剧本位于 [`docs/examples/qidian-demo-script.md`](docs/examples/qidian-demo-script.md) 和 [`docs/examples/qidian-echo-room-script.md`](docs/examples/qidian-echo-room-script.md)。
 演员档期示例位于 [`docs/examples/qidian-actor-availability.csv`](docs/examples/qidian-actor-availability.csv)。
 完整演示步骤、面试讲解话术和提交前验证清单位于 [`docs/demo-and-interview.md`](docs/demo-and-interview.md)。
 Agent 评估集说明和面试讲解要点位于 [`docs/agent-evaluation.md`](docs/agent-evaluation.md)。
