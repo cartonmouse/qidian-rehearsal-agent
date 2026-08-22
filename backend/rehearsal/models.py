@@ -1105,6 +1105,16 @@ class ScheduleTask(BaseModel):
     status: Literal["draft", "scheduled", "unassigned", "overridden"] = "draft"
 
 
+class ScheduleResourceContext(BaseModel):
+    """The music and budget snapshot used while generating a schedule draft."""
+
+    music_cues: list[MusicTimelineNote] = Field(default_factory=list)
+    budget_items: list[BudgetLineItem] = Field(default_factory=list)
+    estimated_total: float = Field(default=0, ge=0)
+    actual_total: float = Field(default=0, ge=0)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class ScheduleDraft(BaseModel):
     script_id: str
     review_status: Literal["pending", "confirmed", "edited"]
@@ -1114,6 +1124,7 @@ class ScheduleDraft(BaseModel):
     root_run_id: str | None = None
     tasks: list[ScheduleTask] = Field(default_factory=list)
     tool_calls: list[ScheduleToolCall] = Field(default_factory=list)
+    resource_context: ScheduleResourceContext | None = None
     created_at: str
 
 

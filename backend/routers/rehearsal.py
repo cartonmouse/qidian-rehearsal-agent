@@ -391,6 +391,20 @@ def _schedule_trace(draft: ScheduleDraft, *, planned: bool) -> list[AgentStep]:
             output_count=len({task.parallel_group for task in draft.tasks}),
         ),
     ]
+    if draft.resource_context is not None:
+        trace.append(AgentStep(
+            name="读取配乐与预算上下文",
+            status="repaired" if draft.resource_context.warnings else "completed",
+            summary=(
+                f"读取 {len(draft.resource_context.music_cues)} 个配乐提示点、"
+                f"{len(draft.resource_context.budget_items)} 个预算项目；"
+                + ("发现预算超支风险，等待人工确认。" if draft.resource_context.warnings else "未发现预算超支提示。")
+            ),
+            output_count=(
+                len(draft.resource_context.music_cues)
+                + len(draft.resource_context.budget_items)
+            ),
+        ))
     if planned:
         trace.extend([
             AgentStep(
@@ -800,6 +814,8 @@ def create_schedule_draft(
             preview=request.preview,
             agent_run_id=run_id,
             root_run_id=run_id,
+            music_notes=get_music_notes(user_id=user_id),
+            budget_items=get_budget_items(user_id=user_id),
         )
     except ValueError as exc:
         raise HTTPException(409, str(exc))
@@ -813,7 +829,7 @@ def create_schedule_draft(
         mode="预览" if request.preview else "正式",
         summary=f"生成 {len(draft.tasks)} 个场次任务，划分 {len({task.parallel_group for task in draft.tasks})} 个并行组。",
         trace=_schedule_trace(draft, planned=False),
-        warnings=[],
+        warnings=list(draft.resource_context.warnings) if draft.resource_context else [],
         duration_ms=_elapsed_ms(started),
         run_id=run_id,
         root_run_id=run_id,
@@ -855,6 +871,8 @@ def plan_schedule(
                 analysis,
                 agent_run_id=draft_run_id,
                 root_run_id=draft_run_id,
+                music_notes=get_music_notes(user_id=user_id),
+                budget_items=get_budget_items(user_id=user_id),
             )
             save_schedule(draft, user_id=user_id)
             record_agent_run(
@@ -866,7 +884,7 @@ def plan_schedule(
                 mode="自动排班前补生成",
                 summary=f"为自动排班补生成 {len(draft.tasks)} 个场次任务。",
                 trace=_schedule_trace(draft, planned=False),
-                warnings=[],
+                warnings=list(draft.resource_context.warnings) if draft.resource_context else [],
                 duration_ms=0,
                 run_id=draft_run_id,
                 root_run_id=draft_run_id,
@@ -896,7 +914,10 @@ def plan_schedule(
             f"{len(unassigned)} 个任务保留未排班及原因。"
         ),
         trace=_schedule_trace(planned, planned=True),
-        warnings=[task.unassigned_reason or "" for task in unassigned],
+        warnings=[
+            *([*planned.resource_context.warnings] if planned.resource_context else []),
+            *[task.unassigned_reason or "" for task in unassigned],
+        ],
         duration_ms=_elapsed_ms(started),
         run_id=plan_run_id,
         parent_run_id=planned.parent_run_id,

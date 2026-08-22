@@ -127,10 +127,26 @@
       {"actor": "顾言", "date": "2026-08-25", "start": "19:00", "end": "21:00"},
       {"actor": "导演", "date": "2026-08-25", "start": "19:00", "end": "21:00"}
     ],
+    "music_notes": [
+      {"track_name": "低频脉冲", "scene_id": "scene-1", "cue_type": "cue", "start_seconds": 12, "note": "灯暗后两拍进"}
+    ],
+    "budget_items": [
+      {"category": "music", "name": "配乐授权", "estimated_amount": 100, "actual_amount": 120, "status": "committed", "note": "待复核"}
+    ],
     "expected": {
       "task_count": 2,
       "scheduled_count": 2,
       "unassigned_count": 0,
+      "resource_context": {
+        "music_count": 1,
+        "budget_count": 1,
+        "estimated_total": 100.0,
+        "actual_total": 120.0,
+        "warning_contains": "超出预计金额"
+      },
+      "tool_result_keys_by_name": {
+        "inspect_rehearsal_resources": ["music_cue_count", "budget_item_count", "budget_variance", "warning_count"]
+      },
       "parallel_groups": [1, 2],
       "first_task_end_equals_second_start": true,
       "second_task_reason_contains": "共享资源",

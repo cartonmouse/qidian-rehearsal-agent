@@ -7,10 +7,13 @@ from datetime import datetime, timezone
 
 from backend.rehearsal.models import (
     AvailabilitySlot,
+    BudgetLineItem,
+    MusicTimelineNote,
     ScheduleAlternative,
     ScheduleDraft,
     ScheduleManualOverride,
     ScheduleOverrideRequest,
+    ScheduleResourceContext,
     ScheduleTask,
     ScheduleToolCall,
     ScriptAnalysis,
@@ -45,6 +48,8 @@ class RehearsalScheduleAgent:
         agent_run_id: str | None = None,
         parent_run_id: str | None = None,
         root_run_id: str | None = None,
+        music_notes: list[MusicTimelineNote] | None = None,
+        budget_items: list[BudgetLineItem] | None = None,
     ) -> ScheduleDraft:
         if analysis.review_status == "pending" and not preview:
             raise ValueError("剧本尚未完成人工确认，不能生成排练调度")
@@ -52,6 +57,7 @@ class RehearsalScheduleAgent:
         groups: list[set[str]] = []
         tasks: list[ScheduleTask] = []
         tool_calls: list[ScheduleToolCall] = []
+        resource_context = self._build_resource_context(music_notes, budget_items)
         self._record_tool_call(
             tool_calls,
             tool_name="inspect_script",
@@ -147,6 +153,31 @@ class RehearsalScheduleAgent:
             },
             summary=f"根据演员和道具资源冲突划分为 {len(groups)} 个并行组。",
         )
+        if resource_context is not None:
+            self._record_tool_call(
+                tool_calls,
+                tool_name="inspect_rehearsal_resources",
+                phase="inspect",
+                arguments={
+                    "music_note_count": len(resource_context.music_cues),
+                    "budget_item_count": len(resource_context.budget_items),
+                    "estimated_total": resource_context.estimated_total,
+                    "actual_total": resource_context.actual_total,
+                },
+                result={
+                    "music_cue_count": len(resource_context.music_cues),
+                    "budget_item_count": len(resource_context.budget_items),
+                    "budget_variance": round(
+                        resource_context.actual_total - resource_context.estimated_total,
+                        2,
+                    ),
+                    "warning_count": len(resource_context.warnings),
+                },
+                summary=(
+                    f"读取 {len(resource_context.music_cues)} 个配乐提示点和 "
+                    f"{len(resource_context.budget_items)} 个预算项目，供排练任务复核。"
+                ),
+            )
         self._record_tool_call(
             tool_calls,
             tool_name="validate_schedule_draft",
@@ -165,7 +196,31 @@ class RehearsalScheduleAgent:
             root_run_id=root_run_id or agent_run_id,
             tasks=tasks,
             tool_calls=tool_calls,
+            resource_context=resource_context,
             created_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+    @staticmethod
+    def _build_resource_context(
+        music_notes: list[MusicTimelineNote] | None,
+        budget_items: list[BudgetLineItem] | None,
+    ) -> ScheduleResourceContext | None:
+        music_cues = list(music_notes or [])
+        items = list(budget_items or [])
+        if not music_cues and not items:
+            return None
+
+        estimated_total = round(sum(item.estimated_amount for item in items), 2)
+        actual_total = round(sum(item.actual_amount for item in items), 2)
+        warnings: list[str] = []
+        if actual_total > estimated_total:
+            warnings.append("当前预算实际金额已超出预计金额，请人工确认。")
+        return ScheduleResourceContext(
+            music_cues=music_cues,
+            budget_items=items,
+            estimated_total=estimated_total,
+            actual_total=actual_total,
+            warnings=warnings,
         )
 
     def assign(

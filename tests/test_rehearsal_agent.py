@@ -525,6 +525,49 @@ def test_schedule_agent_exposes_an_inspectable_tool_call_workflow():
     assert linked_plan.root_run_id == "1" * 32
 
 
+def test_schedule_agent_captures_music_and_budget_context():
+    analysis = ScriptAnalysisAgent().run(
+        title="资源上下文测试",
+        version_label="v1",
+        script_text="第一场\n小林：音乐进。\n导演：开始。",
+        script_id="resource-context",
+        analysis_mode="rules",
+    ).model_copy(update={"review_status": "confirmed"})
+
+    draft = RehearsalScheduleAgent().run(
+        analysis,
+        music_notes=[MusicTimelineNote(
+            track_name="低频脉冲",
+            scene_id="scene-1",
+            cue_type="cue",
+            start_seconds=12,
+            note="灯暗后两拍进",
+        )],
+        budget_items=[BudgetLineItem(
+            category="music",
+            name="配乐授权",
+            estimated_amount=100,
+            actual_amount=120,
+            status="committed",
+        )],
+    )
+
+    assert draft.resource_context is not None
+    assert len(draft.resource_context.music_cues) == 1
+    assert len(draft.resource_context.budget_items) == 1
+    assert draft.resource_context.estimated_total == 100
+    assert draft.resource_context.actual_total == 120
+    assert "超出预计金额" in draft.resource_context.warnings[0]
+    resource_calls = [call for call in draft.tool_calls if call.tool_name == "inspect_rehearsal_resources"]
+    assert len(resource_calls) == 1
+    assert resource_calls[0].result == {
+        "music_cue_count": 1,
+        "budget_item_count": 1,
+        "budget_variance": 20,
+        "warning_count": 1,
+    }
+
+
 def test_line_reading_follows_selected_role_and_source_lines():
     analysis = ScriptAnalysisAgent().run(
         title="对词测试",

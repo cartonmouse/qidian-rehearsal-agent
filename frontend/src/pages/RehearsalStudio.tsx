@@ -711,6 +711,16 @@ export default function RehearsalStudio() {
                           <span className="rounded-full bg-teal/10 px-2.5 py-1 text-teal">{new Set(schedule.tasks.map((task) => task.parallel_group)).size} 个并行组</span>
                           <span className="rounded-full bg-orange/10 px-2.5 py-1 text-orange">{schedule.tool_calls?.length ?? 0} 次工具调用</span>
                         </div>
+                        {schedule.resource_context && (
+                          <div className="rounded-xl border border-border bg-background/35 px-3 py-2.5 text-[11px] leading-5 text-dim">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="font-medium text-text">资源上下文快照</span>
+                              <span>配乐 {schedule.resource_context.music_cues.length} 个提示点 · 预算 {schedule.resource_context.budget_items.length} 项</span>
+                            </div>
+                            <div className="mt-1">预计 ¥{schedule.resource_context.estimated_total.toFixed(2)} · 实际 ¥{schedule.resource_context.actual_total.toFixed(2)} · 生成草案时读取，资源变更后请重新生成。</div>
+                            {schedule.resource_context.warnings.map((warning) => <div key={warning} className="mt-1 rounded-md bg-red/8 px-2 py-1 text-red">{warning}</div>)}
+                          </div>
+                        )}
                         {schedule.agent_run_id && (
                           <div className="flex flex-wrap gap-2 text-[11px] text-dim">
                             <span className="rounded-full border border-primary/20 bg-primary/5 px-2.5 py-1">当前 Run · {schedule.agent_run_id}</span>

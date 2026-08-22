@@ -335,7 +335,16 @@ export interface ScheduleDraft {
   root_run_id: string | null;
   tasks: ScheduleTask[];
   tool_calls: ScheduleToolCall[];
+  resource_context: ScheduleResourceContext | null;
   created_at: string;
+}
+
+export interface ScheduleResourceContext {
+  music_cues: MusicTimelineNote[];
+  budget_items: BudgetLineItem[];
+  estimated_total: number;
+  actual_total: number;
+  warnings: string[];
 }
 
 export interface ScheduleBatchOverrideResponse {

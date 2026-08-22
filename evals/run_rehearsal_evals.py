@@ -20,7 +20,9 @@ from evals.mock_llm import ContractMockLLM
 from backend.rehearsal.agent import ScriptAnalysisAgent
 from backend.rehearsal.models import (
     AvailabilitySlot,
+    BudgetLineItem,
     LineReadingRequest,
+    MusicTimelineNote,
     ResourceInventoryItem,
     ScheduleOverrideRequest,
     ScriptRagQueryRequest,
@@ -278,11 +280,15 @@ def _evaluate_schedule(case: dict[str, Any], checks: list[CheckResult]) -> None:
     linkage = expected.get("run_linkage", {})
     draft_run_id = linkage.get("draft_run_id")
     plan_run_id = linkage.get("plan_run_id")
+    music_notes = [MusicTimelineNote(**payload) for payload in case.get("music_notes", [])]
+    budget_items = [BudgetLineItem(**payload) for payload in case.get("budget_items", [])]
     draft = agent.run(
         analysis,
         default_minutes=int(case.get("default_minutes", 45)),
         agent_run_id=draft_run_id,
         root_run_id=draft_run_id,
+        music_notes=music_notes,
+        budget_items=budget_items,
     )
     slots = [AvailabilitySlot(**payload) for payload in case.get("slots", [])]
     planned = agent.assign(
@@ -308,6 +314,21 @@ def _evaluate_schedule(case: dict[str, Any], checks: list[CheckResult]) -> None:
                 for call in calls
             )
             _check(checks, f"tool_result_contract:{tool_name}", contract_ok, True, passed=contract_ok)
+    resource_expected = expected.get("resource_context")
+    if resource_expected:
+        resource_context = planned.resource_context
+        _check(checks, "resource_context_present", resource_context is not None, True)
+        if resource_context is not None:
+            _check(checks, "resource_music_count", len(resource_context.music_cues), resource_expected["music_count"])
+            _check(checks, "resource_budget_count", len(resource_context.budget_items), resource_expected["budget_count"])
+            _check(checks, "resource_estimated_total", resource_context.estimated_total, resource_expected["estimated_total"])
+            _check(checks, "resource_actual_total", resource_context.actual_total, resource_expected["actual_total"])
+            warning_contains = resource_expected.get("warning_contains")
+            if warning_contains:
+                warning_found = any(warning_contains in warning for warning in resource_context.warnings)
+                _check(checks, "resource_warning", warning_found, True, passed=warning_found)
+        resource_calls = [call for call in planned.tool_calls if call.tool_name == "inspect_rehearsal_resources"]
+        _check(checks, "resource_tool_call", len(resource_calls) == 1, True)
     if "parallel_groups" in expected:
         _check(checks, "parallel_groups", [task.parallel_group for task in draft.tasks], expected["parallel_groups"])
     if "first_task_end_equals_second_start" in expected and len(planned.tasks) >= 2:
