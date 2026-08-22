@@ -10,6 +10,7 @@ from backend.rehearsal.models import (
     ScheduleAlternative,
     ScheduleDraft,
     ScheduleManualOverride,
+    ScheduleOverrideRequest,
     ScheduleTask,
     ScheduleToolCall,
     ScriptAnalysis,
@@ -372,6 +373,133 @@ class RehearsalScheduleAgent:
             "tool_calls": tool_calls,
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
+
+    def apply_manual_overrides(
+        self,
+        draft: ScheduleDraft,
+        overrides: list[ScheduleOverrideRequest],
+        *,
+        agent_run_id: str | None = None,
+        parent_run_id: str | None = None,
+        root_run_id: str | None = None,
+    ) -> ScheduleDraft:
+        """Confirm several slots atomically after validating the whole batch.
+
+        The single-task override intentionally remains permissive because it is
+        an explicit director decision. A batch is different: one invalid item
+        or a resource overlap must reject the complete request before anything
+        is persisted, so a UI retry cannot leave a half-confirmed schedule.
+        """
+        if not overrides:
+            raise ValueError("批量确认至少需要一个排练任务")
+
+        task_by_id = {task.task_id: task for task in draft.tasks}
+        selected_ids = [item.task_id for item in overrides]
+        if len(selected_ids) != len(set(selected_ids)):
+            raise ValueError("批量确认不能重复包含同一排练任务")
+
+        validated: list[tuple[ScheduleTask, ScheduleOverrideRequest, int, int]] = []
+        for item in overrides:
+            task = task_by_id.get(item.task_id)
+            if task is None:
+                raise ValueError(f"找不到要批量确认的排练任务：{item.task_id}")
+            start_minutes = self._to_minutes(item.start)
+            end_minutes = self._to_minutes(item.end)
+            if end_minutes <= start_minutes:
+                raise ValueError(f"第 {task.scene_number} 场人工确认的结束时间必须晚于开始时间")
+            if end_minutes - start_minutes < task.estimated_minutes:
+                raise ValueError(f"第 {task.scene_number} 场确认时长不能少于预计时长 {task.estimated_minutes} 分钟")
+            validated.append((task, item, start_minutes, end_minutes))
+
+        for index, (task, item, start, end) in enumerate(validated):
+            for other_task, other_item, other_start, other_end in validated[index + 1:]:
+                if item.date != other_item.date or end <= other_start or start >= other_end:
+                    continue
+                shared = self._task_resources(task) & self._task_resources(other_task)
+                if shared:
+                    labels = "、".join(sorted(shared))
+                    raise ValueError(
+                        f"批量确认存在资源冲突：第 {task.scene_number} 场与第 {other_task.scene_number} 场共享{labels}"
+                    )
+
+            for other_task in draft.tasks:
+                if other_task.task_id in selected_ids or not other_task.scheduled_date:
+                    continue
+                if item.date != other_task.scheduled_date:
+                    continue
+                other_start = self._to_minutes(other_task.scheduled_start or "00:00")
+                other_end = self._to_minutes(other_task.scheduled_end or "00:00")
+                if end <= other_start or start >= other_end:
+                    continue
+                shared = self._task_resources(task) & self._task_resources(other_task)
+                if shared:
+                    labels = "、".join(sorted(shared))
+                    raise ValueError(
+                        f"批量确认与已有排班冲突：第 {task.scene_number} 场与第 {other_task.scene_number} 场共享{labels}"
+                    )
+
+        now = datetime.now(timezone.utc).isoformat()
+        overrides_by_id = {
+            item.task_id: (item, ScheduleManualOverride(
+                date=item.date,
+                start=item.start,
+                end=item.end,
+                note=item.note.strip() or "导演批量确认排班",
+                created_at=now,
+            ))
+            for _, item, _, _ in validated
+        }
+        updated_tasks: list[ScheduleTask] = []
+        for task in draft.tasks:
+            pair = overrides_by_id.get(task.task_id)
+            if pair is None:
+                updated_tasks.append(task)
+                continue
+            item, override = pair
+            updated_tasks.append(task.model_copy(update={
+                "scheduled_date": item.date,
+                "scheduled_start": item.start,
+                "scheduled_end": item.end,
+                "unassigned_reason": None,
+                "conflict_priority": "none",
+                "alternatives": [],
+                "manual_override": override,
+                "status": "overridden",
+            }))
+        resolved_parent_run_id = parent_run_id if parent_run_id is not None else draft.agent_run_id
+        resolved_root_run_id = root_run_id or draft.root_run_id or draft.agent_run_id or agent_run_id
+        tool_calls = list(draft.tool_calls)
+        self._record_tool_call(
+            tool_calls,
+            tool_name="apply_manual_override_batch",
+            phase="override",
+            arguments={
+                "task_ids": selected_ids,
+                "override_count": len(selected_ids),
+            },
+            result={
+                "status": "overridden",
+                "confirmed_task_ids": selected_ids,
+                "overridden_count": len(selected_ids),
+                "atomic": True,
+            },
+            summary=f"导演一次确认 {len(selected_ids)} 个排练任务；本批次已原子写入。",
+        )
+        return draft.model_copy(update={
+            "agent_run_id": agent_run_id or draft.agent_run_id,
+            "parent_run_id": resolved_parent_run_id,
+            "root_run_id": resolved_root_run_id,
+            "tasks": updated_tasks,
+            "tool_calls": tool_calls,
+            "created_at": now,
+        })
+
+    @staticmethod
+    def _task_resources(task: ScheduleTask) -> set[str]:
+        return {
+            *(f"演员:{actor}" for actor in task.required_characters),
+            *(f"道具:{prop}" for prop in task.props),
+        }
 
     @staticmethod
     def _record_tool_call(

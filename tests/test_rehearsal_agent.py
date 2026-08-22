@@ -41,6 +41,7 @@ from backend.rehearsal.models import (
     RoomBooking,
     RoomBookingRequest,
     Scene,
+    ScheduleOverrideRequest,
     ScriptAnalysis,
     SourceSpan,
     SuggestionRequest,
@@ -227,6 +228,59 @@ def test_schedule_agent_keeps_manual_override_distinct_from_availability_match()
     assert task.manual_override is not None
     assert task.manual_override.note == "导演确认临时到场"
     assert overridden.tool_calls[-1].tool_name == "apply_manual_override"
+
+
+def test_schedule_agent_batch_override_is_atomic_and_exposes_contract():
+    analysis = ScriptAnalysisAgent().run(
+        title="批量确认",
+        version_label="v1",
+        script_text="第一场\n小林：我们开始。\n第二场\n小周：继续。",
+        script_id="batch-override",
+        analysis_mode="rules",
+    ).model_copy(update={"review_status": "confirmed"})
+    agent = RehearsalScheduleAgent()
+    draft = agent.run(analysis, default_minutes=45)
+    planned = agent.assign(draft, [
+        AvailabilitySlot(actor="小林", date="2026-08-25", start="19:00", end="21:00"),
+        AvailabilitySlot(actor="小周", date="2026-08-25", start="19:00", end="21:00"),
+    ])
+    overrides = [
+        ScheduleOverrideRequest(
+            task_id=task.task_id,
+            date="2026-08-26",
+            start="19:00",
+            end="20:00",
+            note="导演批量确认",
+        )
+        for task in planned.tasks
+    ]
+
+    confirmed = agent.apply_manual_overrides(planned, overrides, agent_run_id="4" * 32)
+    assert [task.status for task in confirmed.tasks] == ["overridden", "overridden"]
+    assert confirmed.tool_calls[-1].tool_name == "apply_manual_override_batch"
+    assert confirmed.tool_calls[-1].result == {
+        "status": "overridden",
+        "confirmed_task_ids": [task.task_id for task in planned.tasks],
+        "overridden_count": 2,
+        "atomic": True,
+    }
+
+    invalid_overrides = [
+        overrides[0],
+        ScheduleOverrideRequest(
+            task_id=overrides[1].task_id,
+            date="2026-08-26",
+            start="19:00",
+            end="19:20",
+        ),
+    ]
+    try:
+        agent.apply_manual_overrides(planned, invalid_overrides)
+    except ValueError as exc:
+        assert "不能少于预计时长" in str(exc)
+    else:
+        raise AssertionError("an invalid item must reject the complete batch")
+    assert [task.status for task in planned.tasks] == ["scheduled", "scheduled"]
 
 
 def test_availability_slot_rejects_invalid_calendar_and_interval():

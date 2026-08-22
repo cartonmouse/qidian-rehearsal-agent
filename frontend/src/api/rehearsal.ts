@@ -337,6 +337,14 @@ export interface ScheduleDraft {
   created_at: string;
 }
 
+export interface ScheduleBatchOverrideResponse {
+  script_id: string;
+  schedule: ScheduleDraft;
+  confirmed_task_ids: string[];
+  overridden_count: number;
+  atomic: boolean;
+}
+
 export interface AvailabilitySlot {
   actor: string;
   date: string;
@@ -795,6 +803,19 @@ export async function overrideSchedule(
     body: JSON.stringify(payload),
   });
   await ensureOk(response, "人工覆盖排班失败");
+  return response.json();
+}
+
+export async function confirmScheduleBatch(
+  scriptId: string,
+  overrides: Array<{ task_id: string; date: string; start: string; end: string; note?: string }>,
+): Promise<ScheduleBatchOverrideResponse> {
+  const response = await authFetch(`/api/rehearsal/scripts/${encodeURIComponent(scriptId)}/schedule/override-batch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ overrides }),
+  });
+  await ensureOk(response, "批量确认排班失败");
   return response.json();
 }
 

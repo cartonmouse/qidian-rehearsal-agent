@@ -60,6 +60,8 @@ from backend.rehearsal.models import (
     StageVisualization,
     ScriptVersionDiff,
     ScheduleDraft,
+    ScheduleBatchOverrideRequest,
+    ScheduleBatchOverrideResponse,
     ScheduleDraftRequest,
     ScheduleOverrideRequest,
     SchedulePlanRequest,
@@ -953,6 +955,60 @@ def override_schedule(
         root_run_id=updated.root_run_id,
     )
     return updated
+
+
+@router.post("/scripts/{script_id}/schedule/override-batch", response_model=ScheduleBatchOverrideResponse)
+def override_schedule_batch(
+    script_id: str,
+    request: ScheduleBatchOverrideRequest,
+    user_id: str = Depends(get_current_user),
+):
+    """Confirm several director-selected schedule slots as one atomic action."""
+    try:
+        analysis = get_script(script_id, user_id=user_id)
+        draft = get_schedule(script_id, user_id=user_id)
+    except ValueError:
+        raise HTTPException(400, "无效的剧本或调度 ID")
+    if analysis is None:
+        raise HTTPException(404, "剧本解析结果不存在")
+    if draft is None:
+        raise HTTPException(404, "排练调度草案不存在")
+    started = perf_counter()
+    run_id = uuid4().hex
+    try:
+        updated = RehearsalScheduleAgent().apply_manual_overrides(
+            draft,
+            request.overrides,
+            agent_run_id=run_id,
+            parent_run_id=draft.agent_run_id,
+            root_run_id=draft.root_run_id or draft.agent_run_id or run_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    save_schedule(updated, user_id=user_id)
+    confirmed_task_ids = [item.task_id for item in request.overrides]
+    record_agent_run(
+        user_id=user_id,
+        agent="schedule-plan",
+        action="批量人工确认排班",
+        script_id=analysis.script_id,
+        script_title=analysis.title,
+        mode="导演批量确认",
+        summary=f"导演一次确认 {len(confirmed_task_ids)} 个排练任务。",
+        trace=_schedule_trace(updated, planned=True),
+        warnings=[],
+        duration_ms=_elapsed_ms(started),
+        run_id=run_id,
+        parent_run_id=updated.parent_run_id,
+        root_run_id=updated.root_run_id,
+    )
+    return ScheduleBatchOverrideResponse(
+        script_id=analysis.script_id,
+        schedule=updated,
+        confirmed_task_ids=confirmed_task_ids,
+        overridden_count=len(confirmed_task_ids),
+        atomic=True,
+    )
 
 
 @router.post("/scripts/{script_id}/line-reading", response_model=LineReadingResponse)

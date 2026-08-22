@@ -22,6 +22,7 @@ from backend.rehearsal.models import (
     AvailabilitySlot,
     LineReadingRequest,
     ResourceInventoryItem,
+    ScheduleOverrideRequest,
     ScriptRagQueryRequest,
 )
 from backend.rehearsal.rag_agent import ScriptRagAgent
@@ -335,6 +336,29 @@ def _evaluate_schedule(case: dict[str, Any], checks: list[CheckResult]) -> None:
         _check(checks, "plan_run_id", planned.agent_run_id, plan_run_id)
         _check(checks, "parent_run_id", planned.parent_run_id, draft_run_id)
         _check(checks, "root_run_id", planned.root_run_id, draft_run_id)
+    batch_expected = expected.get("batch_override")
+    if batch_expected:
+        item_specs = batch_expected.get("items") or [batch_expected] * len(planned.tasks)
+        if len(item_specs) != len(planned.tasks):
+            raise ValueError("batch override eval must provide one slot per task")
+        overrides = [ScheduleOverrideRequest(
+            task_id=task.task_id,
+            date=slot["date"],
+            start=slot["start"],
+            end=slot["end"],
+            note="eval batch confirmation",
+        ) for task, slot in zip(planned.tasks, item_specs)]
+        confirmed = agent.apply_manual_overrides(planned, overrides, agent_run_id="3" * 32)
+        _check(
+            checks,
+            "batch_override_statuses",
+            [task.status for task in confirmed.tasks],
+            ["overridden"] * len(planned.tasks),
+        )
+        batch_call = confirmed.tool_calls[-1]
+        _check(checks, "batch_override_tool_name", batch_call.tool_name, "apply_manual_override_batch")
+        _check(checks, "batch_override_atomic", batch_call.result.get("atomic"), True)
+        _check(checks, "batch_override_count", batch_call.result.get("overridden_count"), batch_expected["count"])
 
 
 def _evaluate_resource_check(case: dict[str, Any], checks: list[CheckResult]) -> None:

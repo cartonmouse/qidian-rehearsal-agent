@@ -17,6 +17,7 @@ import {
 import { useNavigate } from "react-router-dom";
 
 import {
+  confirmScheduleBatch,
   generateScheduleDraft,
   getAvailability,
   getScheduleDraft,
@@ -253,6 +254,35 @@ export default function ActorSchedule() {
     }
   }
 
+  async function confirmScheduledBatch() {
+    if (!selectedScript || !schedule) return;
+    const overrides = schedule.tasks
+      .filter((task) => task.status === "scheduled" && task.scheduled_date && task.scheduled_start && task.scheduled_end)
+      .map((task) => ({
+        task_id: task.task_id,
+        date: task.scheduled_date as string,
+        start: task.scheduled_start as string,
+        end: task.scheduled_end as string,
+        note: "导演批量确认自动排班时段",
+      }));
+    if (overrides.length === 0) {
+      setError("当前没有可批量确认的自动排班任务");
+      return;
+    }
+    setPlanning(true);
+    setError("");
+    setMessage("");
+    try {
+      const result = await confirmScheduleBatch(selectedScript.script_id, overrides);
+      setSchedule(result.schedule);
+      setMessage(`已原子确认 ${result.overridden_count} 个排练任务；人工确认不会伪装成演员档期校验通过。`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "批量确认排班失败");
+    } finally {
+      setPlanning(false);
+    }
+  }
+
   return (
     <div className={cn(PAGE_CLASS, "space-y-4")}>
       <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
@@ -423,6 +453,7 @@ export default function ActorSchedule() {
                 onCreate={() => void createSchedule()}
                 onPlan={() => void autoPlan()}
                 onOverride={applyScheduleOverride}
+                onBatchConfirm={() => void confirmScheduledBatch()}
               />
             )}
           </CardContent>
@@ -514,6 +545,7 @@ function ScheduleOverview({
   onCreate,
   onPlan,
   onOverride,
+  onBatchConfirm,
 }: {
   schedule: ScheduleDraft;
   selectedScript: ScriptSummary;
@@ -523,6 +555,7 @@ function ScheduleOverview({
   onCreate: () => void;
   onPlan: () => void;
   onOverride: (payload: ScheduleOverridePayload) => Promise<void>;
+  onBatchConfirm: () => void;
 }) {
   const parallelCount = new Set(schedule.tasks.map((task) => task.parallel_group)).size;
   return (
@@ -548,6 +581,16 @@ function ScheduleOverview({
           <Button type="button" size="sm" onClick={onPlan} disabled={planning}>
             {planning ? <Loader2 className="animate-spin" /> : <CalendarClock size={14} />}
             自动排班
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={onBatchConfirm}
+            disabled={planning || !schedule.tasks.some((task) => task.status === "scheduled")}
+          >
+            <CheckCircle2 size={14} />
+            批量确认已排任务
           </Button>
         </div>
       </div>

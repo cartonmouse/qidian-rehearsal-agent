@@ -213,6 +213,12 @@ class ScheduleOverrideRequest(BaseModel):
         return self
 
 
+class ScheduleBatchOverrideRequest(BaseModel):
+    """A single atomic director confirmation for several schedule tasks."""
+
+    overrides: list[ScheduleOverrideRequest] = Field(min_length=1, max_length=200)
+
+
 class AvailabilityUpdateRequest(BaseModel):
     """User-level actor availability that can be maintained before a script exists."""
 
@@ -1101,6 +1107,16 @@ class ScheduleDraft(BaseModel):
     tasks: list[ScheduleTask] = Field(default_factory=list)
     tool_calls: list[ScheduleToolCall] = Field(default_factory=list)
     created_at: str
+
+
+class ScheduleBatchOverrideResponse(BaseModel):
+    """Result contract for a batch confirmation; no partial write is reported."""
+
+    script_id: str
+    schedule: ScheduleDraft
+    confirmed_task_ids: list[str] = Field(default_factory=list)
+    overridden_count: int = Field(ge=0)
+    atomic: bool = True
 
 
 class ScriptAnalysis(BaseModel):
