@@ -814,6 +814,20 @@ class SceneDiff(BaseModel):
     summary: str = ""
 
 
+class VersionDownstreamImpact(BaseModel):
+    """A deterministic reminder for artifacts that may be stale after a version change."""
+
+    impact_type: Literal["schedule", "line-reading", "resource"]
+    severity: Literal["high", "medium", "info"]
+    scene_key: str
+    scene_number: int = Field(ge=1)
+    scene_title: str = ""
+    affected_characters: list[str] = Field(default_factory=list)
+    affected_props: list[str] = Field(default_factory=list)
+    reason: str
+    action: str
+
+
 class ScriptVersionDiff(BaseModel):
     previous_script_id: str
     current_script_id: str
@@ -827,6 +841,10 @@ class ScriptVersionDiff(BaseModel):
     unchanged_scene_count: int = Field(ge=0)
     scenes: list[SceneDiff] = Field(default_factory=list)
     summary: str
+    downstream_impacts: list[VersionDownstreamImpact] = Field(default_factory=list)
+    requires_schedule_review: bool = False
+    requires_line_reading_review: bool = False
+    requires_resource_review: bool = False
 
 
 StagePosition = Literal[

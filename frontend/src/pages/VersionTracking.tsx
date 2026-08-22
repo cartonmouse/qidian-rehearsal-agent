@@ -2,10 +2,12 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   ArrowRight,
+  CalendarClock,
   CheckCircle2,
   FileText,
   GitBranch,
   Loader2,
+  MessageCircle,
   Minus,
   Package,
   PencilLine,
@@ -20,6 +22,7 @@ import {
   type ScriptLineChange,
   type ScriptSummary,
   type ScriptVersionDiff,
+  type VersionDownstreamImpact,
 } from "@/api/rehearsal";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -231,6 +234,8 @@ function DiffResult({
   setFilter: (value: SceneDiff["status"] | "all") => void;
   visibleScenes: SceneDiff[];
 }) {
+  const navigate = useNavigate();
+
   return (
     <div className="space-y-4">
       <Card>
@@ -258,6 +263,8 @@ function DiffResult({
         </CardContent>
       </Card>
 
+      <DownstreamImpactPanel diff={diff} onNavigate={(path) => navigate(path)} />
+
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-sm font-semibold">场次变更明细</div>
         <select
@@ -284,6 +291,127 @@ function DiffResult({
         </div>
       )}
     </div>
+  );
+}
+
+function DownstreamImpactPanel({
+  diff,
+  onNavigate,
+}: {
+  diff: ScriptVersionDiff;
+  onNavigate: (path: string) => void;
+}) {
+  if (diff.downstream_impacts.length === 0) {
+    return (
+      <Card className="border-green/20 bg-green/4">
+        <CardContent className="flex items-start gap-3 p-4 md:p-5">
+          <CheckCircle2 className="mt-0.5 shrink-0 text-green" size={18} />
+          <div>
+            <div className="font-semibold">没有需要传递给下游模块的变化</div>
+            <p className="mt-1 text-sm leading-6 text-dim">两个版本的场次、角色、道具和台词保持一致，现有调度与对词记录可以继续使用。</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="border-orange/25 bg-orange/4">
+      <CardContent className="p-4 md:p-5">
+        <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-base font-semibold">
+              <AlertTriangle className="text-orange" size={18} />
+              下游影响提醒
+            </div>
+            <p className="mt-1 text-sm leading-6 text-dim">版本差异已经识别出可能失效的排班、对词进度或资源结论。先完成人工确认，再进入对应模块重新生成。</p>
+          </div>
+          <div className="flex flex-wrap gap-1.5 text-[10px]">
+            {diff.requires_schedule_review && <ImpactFlag icon={<CalendarClock size={12} />} label="排班需要复核" />}
+            {diff.requires_line_reading_review && <ImpactFlag icon={<MessageCircle size={12} />} label="对词需要重开" />}
+            {diff.requires_resource_review && <ImpactFlag icon={<Package size={12} />} label="道具需要复核" />}
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 lg:grid-cols-3">
+          {diff.downstream_impacts.map((impact) => (
+            <DownstreamImpactCard key={`${impact.impact_type}-${impact.scene_key}`} impact={impact} onNavigate={onNavigate} />
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ImpactFlag({ icon, label }: { icon: ReactNode; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-orange/25 bg-orange/10 px-2 py-1 text-orange">
+      {icon}
+      {label}
+    </span>
+  );
+}
+
+function DownstreamImpactCard({
+  impact,
+  onNavigate,
+}: {
+  impact: VersionDownstreamImpact;
+  onNavigate: (path: string) => void;
+}) {
+  const meta = {
+    schedule: {
+      icon: <CalendarClock size={15} />,
+      title: "需要重新生成调度",
+      button: "打开演员排练表",
+      path: "/rehearsal/schedule",
+    },
+    "line-reading": {
+      icon: <MessageCircle size={15} />,
+      title: "需要重新开始对词",
+      button: "打开对词训练",
+      path: "/rehearsal/line-reading",
+    },
+    resource: {
+      icon: <Package size={15} />,
+      title: "需要重新检查道具",
+      button: "打开资源管理",
+      path: "/rehearsal/resources",
+    },
+  }[impact.impact_type];
+  const severityStyles = {
+    high: "border-red/25 bg-red/5",
+    medium: "border-orange/25 bg-orange/5",
+    info: "border-teal/25 bg-teal/5",
+  };
+
+  return (
+    <article className={cn("rounded-xl border p-3", severityStyles[impact.severity])}>
+      <div className="flex items-start gap-2">
+        <span className="mt-0.5 text-primary">{meta.icon}</span>
+        <div className="min-w-0">
+          <div className="text-sm font-semibold">{meta.title}</div>
+          <div className="mt-0.5 truncate text-[11px] text-dim">第 {impact.scene_number} 场 · {impact.scene_title}</div>
+        </div>
+      </div>
+      <p className="mt-3 text-xs leading-5 text-text">{impact.reason}</p>
+
+      {(impact.affected_characters.length > 0 || impact.affected_props.length > 0) && (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {impact.affected_characters.map((character) => <span key={`actor-${character}`} className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary">演员：{character}</span>)}
+          {impact.affected_props.map((prop) => <span key={`prop-${prop}`} className="rounded-full bg-card/80 px-2 py-0.5 text-[10px] text-dim">道具：{prop}</span>)}
+        </div>
+      )}
+
+      <div className="mt-3 border-t border-current/10 pt-3 text-xs leading-5">
+        <span className="font-medium text-text">建议动作：</span>
+        <span className="text-dim">{impact.action}</span>
+      </div>
+      <Button type="button" variant="outline" size="sm" className="mt-3 w-full justify-between" onClick={() => onNavigate(meta.path)}>
+        {meta.button}
+        <ArrowRight size={14} />
+      </Button>
+    </article>
   );
 }
 

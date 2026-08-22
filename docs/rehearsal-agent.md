@@ -119,6 +119,8 @@ LLM 回答必须引用检索结果中的证据 ID，并通过 Pydantic 校验；
 - 新增、删除、修改的台词，以及旧行号/新行号；
 - 受影响演员、道具和需要重新核对台词的角色。
 
+响应还会生成 `downstream_impacts`：每个受影响场次分别给出 `schedule`、`line-reading` 或 `resource` 类型、严重级别、受影响演员/道具、触发原因和建议动作，并用 `requires_schedule_review`、`requires_line_reading_review`、`requires_resource_review` 汇总是否需要复核。版本追踪页面会把这些提醒展示成可操作卡片，分别跳转到演员排练表、对词训练和资源管理；它不会自动覆盖已有排班或对词进度，最终动作仍由导演确认。
+
 因此剧本版本变化可以直接传递给调度 Agent 和导演人工确认环节。版本追踪页面只展示用户自己保存的剧本，不改变任何一个版本的原始内容。
 
 ### 舞台可视化 Stage Agent

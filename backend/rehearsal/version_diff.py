@@ -12,6 +12,7 @@ from backend.rehearsal.models import (
     ScriptLineChange,
     ScriptAnalysis,
     ScriptVersionDiff,
+    VersionDownstreamImpact,
 )
 
 
@@ -98,6 +99,8 @@ class ScriptVersionDiffAgent:
                 f"共检测到 {total_changes} 个受影响场次：新增 {added_count} 场、"
                 f"删除 {removed_count} 场、修改 {changed_count} 场。"
             )
+        downstream_impacts = self._downstream_impacts(scene_diffs)
+        impact_types = {item.impact_type for item in downstream_impacts}
 
         return ScriptVersionDiff(
             previous_script_id=previous.script_id,
@@ -112,6 +115,10 @@ class ScriptVersionDiffAgent:
             unchanged_scene_count=unchanged_count,
             scenes=scene_diffs,
             summary=summary,
+            downstream_impacts=downstream_impacts,
+            requires_schedule_review="schedule" in impact_types,
+            requires_line_reading_review="line-reading" in impact_types,
+            requires_resource_review="resource" in impact_types,
         )
 
     def _compare_scene(
@@ -234,3 +241,83 @@ class ScriptVersionDiffAgent:
         if unique_line_characters:
             impact.append("需重新核对台词：" + "、".join(unique_line_characters))
         return impact
+
+    @staticmethod
+    def _unique(values: list[str]) -> list[str]:
+        return sorted({value.strip() for value in values if value.strip()})
+
+    @classmethod
+    def _downstream_impacts(cls, scene_diffs: list[SceneDiff]) -> list[VersionDownstreamImpact]:
+        """Translate scene facts into explicit, deterministic downstream actions."""
+
+        impacts: list[VersionDownstreamImpact] = []
+        for scene in scene_diffs:
+            if scene.status == "unchanged":
+                continue
+
+            scene_title = scene.new_title or scene.old_title or f"第 {scene.scene_number} 场"
+            line_characters = [change.character for change in scene.line_changes]
+            affected_characters = cls._unique(
+                [*scene.added_characters, *scene.removed_characters, *line_characters]
+            )
+            affected_props = cls._unique([*scene.added_props, *scene.removed_props])
+            roster_changed = bool(scene.added_characters or scene.removed_characters)
+            schedule_severity = "high" if scene.status in {"added", "removed"} or roster_changed else "medium"
+            if scene.status == "added":
+                schedule_reason = f"第 {scene.scene_number} 场为新增场次，原有排练计划没有对应任务。"
+                schedule_action = "人工确认新场次后重新生成调度，并检查已有排班。"
+            elif scene.status == "removed":
+                schedule_reason = f"第 {scene.scene_number} 场已从当前版本删除，原有排练任务可能仍然占用演员和场地。"
+                schedule_action = "人工确认删除后重新生成调度，并清理不再需要的排班。"
+            else:
+                schedule_reason = f"{scene.summary} 原有调度中的演员、道具或时长可能已经失效。"
+                schedule_action = "人工确认变更后重新生成调度，再检查演员档期与并行组。"
+            impacts.append(
+                VersionDownstreamImpact(
+                    impact_type="schedule",
+                    severity=schedule_severity,
+                    scene_key=scene.scene_key,
+                    scene_number=scene.scene_number,
+                    scene_title=scene_title,
+                    affected_characters=affected_characters,
+                    affected_props=affected_props,
+                    reason=schedule_reason,
+                    action=schedule_action,
+                )
+            )
+
+            if scene.line_changes:
+                impacts.append(
+                    VersionDownstreamImpact(
+                        impact_type="line-reading",
+                        severity="high",
+                        scene_key=scene.scene_key,
+                        scene_number=scene.scene_number,
+                        scene_title=scene_title,
+                        affected_characters=cls._unique(line_characters),
+                        reason=(
+                            f"第 {scene.scene_number} 场有 {len(scene.line_changes)} 处台词变化，"
+                            "旧对词进度和回应可能不再对应当前台词。"
+                        ),
+                        action="切换到当前版本重新开始对词，避免沿用旧台词进度。",
+                    )
+                )
+
+            if affected_props:
+                impacts.append(
+                    VersionDownstreamImpact(
+                        impact_type="resource",
+                        severity="medium",
+                        scene_key=scene.scene_key,
+                        scene_number=scene.scene_number,
+                        scene_title=scene_title,
+                        affected_characters=[],
+                        affected_props=affected_props,
+                        reason=(
+                            f"第 {scene.scene_number} 场的道具清单发生变化：{'、'.join(affected_props)}。"
+                            "现有库存结论需要重新确认。"
+                        ),
+                        action="重新执行排练前道具检查，确认库存与维修状态。",
+                    )
+                )
+        return impacts

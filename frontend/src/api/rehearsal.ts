@@ -143,6 +143,18 @@ export interface SceneDiff {
   summary: string;
 }
 
+export interface VersionDownstreamImpact {
+  impact_type: "schedule" | "line-reading" | "resource";
+  severity: "high" | "medium" | "info";
+  scene_key: string;
+  scene_number: number;
+  scene_title: string;
+  affected_characters: string[];
+  affected_props: string[];
+  reason: string;
+  action: string;
+}
+
 export interface ScriptVersionDiff {
   previous_script_id: string;
   current_script_id: string;
@@ -156,6 +168,10 @@ export interface ScriptVersionDiff {
   unchanged_scene_count: number;
   scenes: SceneDiff[];
   summary: string;
+  downstream_impacts: VersionDownstreamImpact[];
+  requires_schedule_review: boolean;
+  requires_line_reading_review: boolean;
+  requires_resource_review: boolean;
 }
 
 export type StagePosition =

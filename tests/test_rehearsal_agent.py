@@ -373,7 +373,7 @@ def test_script_version_diff_marks_scene_line_and_actor_changes():
     current = parser.run(
         title="轨道之外",
         version_label="v2",
-        script_text="第一场 走廊\n导演：准备，进来。\n小林：我来了。\n许教授：等等。\n第二场\n小林：下一场。",
+        script_text="第一场 走廊\n导演：准备，进来。\n小林：我来了。\n（小林拿起手电筒。）\n许教授：等等。\n第二场\n小林：下一场。",
     )
 
     diff = ScriptVersionDiffAgent().compare(previous, current)
@@ -385,9 +385,20 @@ def test_script_version_diff_marks_scene_line_and_actor_changes():
     assert first_scene.status == "changed"
     assert first_scene.new_title == "走廊"
     assert first_scene.added_characters == ["许教授"]
+    assert first_scene.added_props == ["手电筒"]
     assert {change.change_type for change in first_scene.line_changes} == {"modified", "added"}
     assert "新增演员：许教授" in first_scene.impact
     assert "需重新核对台词：导演、许教授" in first_scene.impact
+    assert diff.requires_schedule_review is True
+    assert diff.requires_line_reading_review is True
+    assert diff.requires_resource_review is True
+    assert {item.impact_type for item in diff.downstream_impacts} == {"schedule", "line-reading", "resource"}
+    schedule_impact = next(item for item in diff.downstream_impacts if item.impact_type == "schedule")
+    assert schedule_impact.scene_number == 1
+    assert schedule_impact.severity == "high"
+    assert "演员档期" in schedule_impact.action
+    resource_impact = next(item for item in diff.downstream_impacts if item.impact_type == "resource")
+    assert resource_impact.affected_props == ["手电筒"]
 
 
 def test_script_version_diff_reports_identical_versions_without_changes():
@@ -402,6 +413,32 @@ def test_script_version_diff_reports_identical_versions_without_changes():
     assert diff.summary == "两个剧本版本的场次、角色、道具和台词没有检测到变化。"
     assert diff.unchanged_scene_count == 1
     assert diff.scenes[0].status == "unchanged"
+    assert diff.downstream_impacts == []
+    assert diff.requires_schedule_review is False
+    assert diff.requires_line_reading_review is False
+    assert diff.requires_resource_review is False
+
+
+def test_script_version_diff_marks_line_only_change_without_resource_review():
+    parser = ScriptAnalysisAgent()
+    previous = parser.run(
+        title="台词测试",
+        version_label="v1",
+        script_text="第一场\n小林：再来一遍。",
+    )
+    current = parser.run(
+        title="台词测试",
+        version_label="v2",
+        script_text="第一场\n小林：我们再来一遍。",
+    )
+
+    diff = ScriptVersionDiffAgent().compare(previous, current)
+
+    assert diff.requires_schedule_review is True
+    assert diff.requires_line_reading_review is True
+    assert diff.requires_resource_review is False
+    assert [item.impact_type for item in diff.downstream_impacts] == ["schedule", "line-reading"]
+    assert diff.downstream_impacts[1].affected_characters == ["小林"]
 
 
 def test_stage_agent_keeps_stage_direction_source_and_builds_actor_prop_events():
