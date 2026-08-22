@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
-  Archive, BarChart3, BookMarked, CalendarClock, ClipboardPenLine, FileText, GitBranch, Inbox, Map, MessageCircle, NotebookPen, Search, Theater, Settings as SettingsIcon,
+  Activity, Archive, BarChart3, BookMarked, CalendarClock, ClipboardPenLine, FileText, GitBranch, Inbox, Map, MessageCircle, NotebookPen, Search, Theater, Settings as SettingsIcon,
   Sun, Moon, LogOut, Menu, X, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -37,6 +37,7 @@ const NAV_ITEMS: NavItem[] = [
   { path: "/rehearsal/stage", label: "舞台可视化", icon: Map },
   { path: "/rehearsal/resources", label: "资源管理", icon: Archive },
   { path: "/rehearsal/resource-finance", label: "音乐与预算", icon: FileText },
+  { path: "/rehearsal/runs", label: "Agent运行记录", icon: Activity },
   { path: "/settings", label: "设置", icon: SettingsIcon },
 ];
 

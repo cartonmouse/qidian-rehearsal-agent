@@ -76,6 +76,17 @@
 
 LLM 回答必须引用检索结果中的证据 ID，并通过 Pydantic 校验；它不能新增场次、行号或剧本事实。没有命中证据时，规则回答会明确表示“无法从当前剧本证实”，LLM 分支也会回退，不允许凭常识补写。响应中的 `engine`、`retrieval_engine` 和 `note` 会说明实际走了规则、语义、LLM 还是降级路径，因此没有 API Key 也可以先演示完整的规则 RAG 闭环。
 
+### Agent 运行记录
+
+`GET /api/rehearsal/agent-runs?limit=50` 提供一条独立的可观察性入口，当前覆盖剧本解析、调度草案、自动排班、对词和剧本问答五类运行。每条 `AgentRunRecord` 保存：
+
+- Agent 类型、动作、绑定剧本和运行模式；
+- `completed`、`fallback` 或 `failed` 状态，以及后端耗时；
+- 结构化 `trace`：每个步骤的名称、状态、摘要和产出数量；
+- 降级或未排班等需要关注的原因。
+
+运行记录只保存结构化摘要，不把完整剧本、API Key 或模型原始响应写进审计记录；路径仍通过当前用户 ID 隔离。`GET /api/rehearsal/agent-runs/{run_id}` 可读取单次详情，前端“Agent运行记录”页面用它展示 Agent 的执行轨迹。这使得项目可以回答“Agent 经过了哪些步骤、哪一步使用了规则或模型、为什么没有直接给出结果”，而不是只展示最终 JSON。
+
 ### 排练复盘与镜子 Agent
 
 排练反馈是独立于剧本解析的知识资产。`POST /api/rehearsal/feedback` 可以只提交排练日期、参与者、具体产出和原始反馈，也可以选填剧本与场次作为上下文。服务端保存完整原始笔记，再由镜子 Agent 生成：
@@ -200,6 +211,7 @@ Suggestion Agent 的第一版只做可解释判断：分类为 `safety`，或内
 - `剧本问答`：针对一个已保存剧本版本提问，查看检索证据、原文行号和回答引擎路径。
 - `排练复盘`：独立记录一次排练的产出和原始反馈，使用镜子 Agent 生成结构化复盘并回看历史档案。
 - `排练度量`：按 7/30/90 天查看排练趋势、产出覆盖率、高频亮点/阻塞和 Agent 路径。
+- `Agent运行记录`：回看解析、调度、排班、对词和剧本问答的结构化步骤、耗时和降级原因。
 - `版本追踪`：选择两个已保存剧本版本，查看场次、资源和台词差异。
 - `舞台可视化`：选择一个剧本场次，查看角色头像、道具位置和上下场动态列表。
 - `资源管理`：维护道具/服装库存，预约排练室，按剧本或场次运行排练前道具就绪检查。
@@ -228,6 +240,7 @@ Suggestion Agent 的第一版只做可解释判断：分类为 `safety`，或内
 - Knowledge asset boundary：格言 Agent 保留原文，宣传文案 Agent 只引用已保存结构和 brief；LLM 返回经过结构校验，失败时有规则降级并报告 engine。
 - RAG evidence boundary：剧本问答先检索带 `source_line` 的证据，再组织回答；LLM 只能引用证据 ID，无命中时拒答，`engine` 和 `retrieval_engine` 可审计实际路径。
 - Metrics boundary：度量 Agent 只聚合已归档字段，并保留记录 ID 作为回指，不把有限样本推断成排练质量结论。
+- Agent observability：核心 Agent 将动作、模式、耗时、结构化步骤和降级原因写入用户隔离的运行记录，前端支持按次回看；审计摘要不携带 API Key 或完整原文。
 
 ## 关键 API
 
@@ -238,6 +251,8 @@ Suggestion Agent 的第一版只做可解释判断：分类为 `safety`，或内
 - `POST /api/rehearsal/scripts/{script_id}/schedule/plan`
 - `POST /api/rehearsal/scripts/{script_id}/line-reading`
 - `POST /api/rehearsal/scripts/{script_id}/rag`
+- `GET /api/rehearsal/agent-runs?limit=50`
+- `GET /api/rehearsal/agent-runs/{run_id}`
 - `POST /api/rehearsal/feedback`
 - `GET /api/rehearsal/feedback`
 - `GET /api/rehearsal/feedback/metrics?days=30`

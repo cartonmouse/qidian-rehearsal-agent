@@ -9,6 +9,7 @@ from pathlib import Path
 from backend.config import settings
 from backend.rehearsal.models import (
     AvailabilitySlot,
+    AgentRunRecord,
     BudgetLineItem,
     InvoiceRecord,
     MottoResponse,
@@ -27,6 +28,7 @@ from backend.rehearsal.models import (
 
 _SCRIPT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _RESOURCE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+_RUN_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 
 def _scripts_dir(user_id: str) -> Path:
@@ -73,6 +75,47 @@ def list_scripts(*, user_id: str) -> list[ScriptSummary]:
             review_status=analysis.review_status,
             created_at=analysis.created_at,
         ))
+    return result
+
+
+def _agent_runs_dir(user_id: str) -> Path:
+    path = settings.user_data_dir(user_id) / "rehearsal" / "agent-runs"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _agent_run_path(user_id: str, run_id: str) -> Path:
+    if not _RUN_ID_RE.fullmatch(run_id):
+        raise ValueError("invalid agent run id")
+    return _agent_runs_dir(user_id) / f"{run_id}.json"
+
+
+def save_agent_run(record: AgentRunRecord, *, user_id: str) -> None:
+    _agent_run_path(user_id, record.run_id).write_text(
+        json.dumps(record.model_dump(mode="json"), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def get_agent_run(run_id: str, *, user_id: str) -> AgentRunRecord | None:
+    path = _agent_run_path(user_id, run_id)
+    if not path.exists():
+        return None
+    try:
+        return AgentRunRecord.model_validate(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def list_agent_runs(*, user_id: str, limit: int = 50) -> list[AgentRunRecord]:
+    result: list[AgentRunRecord] = []
+    for path in sorted(_agent_runs_dir(user_id).glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
+        if len(result) >= limit:
+            break
+        try:
+            result.append(AgentRunRecord.model_validate(json.loads(path.read_text(encoding="utf-8"))))
+        except (OSError, ValueError, TypeError):
+            continue
     return result
 
 

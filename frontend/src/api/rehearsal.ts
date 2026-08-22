@@ -49,6 +49,21 @@ export interface AgentStep {
   output_count: number;
 }
 
+export interface AgentRunRecord {
+  run_id: string;
+  agent: "script-analysis" | "schedule-draft" | "schedule-plan" | "line-reading" | "script-rag";
+  action: string;
+  script_id: string | null;
+  script_title: string;
+  mode: string;
+  status: "completed" | "fallback" | "failed";
+  summary: string;
+  trace: AgentStep[];
+  warnings: string[];
+  duration_ms: number;
+  created_at: string;
+}
+
 export interface ScriptAnalysis {
   script_id: string;
   title: string;
@@ -489,6 +504,18 @@ export async function parseScript(payload: {
     body: JSON.stringify(payload),
   });
   await ensureOk(response);
+  return response.json();
+}
+
+export async function getAgentRuns(limit = 50): Promise<AgentRunRecord[]> {
+  const response = await authFetch(`/api/rehearsal/agent-runs?limit=${limit}`);
+  await ensureOk(response, "Agent 运行记录加载失败");
+  return response.json();
+}
+
+export async function getAgentRun(runId: string): Promise<AgentRunRecord> {
+  const response = await authFetch(`/api/rehearsal/agent-runs/${encodeURIComponent(runId)}`);
+  await ensureOk(response, "Agent 运行记录加载失败");
   return response.json();
 }
 

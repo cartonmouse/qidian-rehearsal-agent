@@ -1,8 +1,10 @@
 from datetime import date
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from pydantic import ValidationError
 
+from backend.config import settings
 from backend.rehearsal.agent import ScriptAnalysisAgent
 from backend.rehearsal.feedback_agent import RehearsalMirrorAgent
 from backend.rehearsal.finance_agent import ResourceFinanceAgent
@@ -13,9 +15,12 @@ from backend.rehearsal.motto_agent import MottoAgent
 from backend.rehearsal.promo_agent import PromoCopyAgent
 from backend.rehearsal.rag_agent import ScriptRagAgent
 from backend.rehearsal.resource_agent import ResourceAgent, room_booking_conflicts
+from backend.rehearsal.run_log import outcome_status, record_agent_run
+from backend.rehearsal.storage import get_agent_run, list_agent_runs
 from backend.rehearsal.suggestion_agent import SuggestionInboxAgent
 from backend.rehearsal.models import (
     AvailabilitySlot,
+    AgentStep,
     BudgetLineItem,
     InvoiceRecord,
     LineReadingRequest,
@@ -858,3 +863,37 @@ def test_rehearsal_demo_flow_connects_core_agents_without_provider_keys():
     )
     assert promo.engine == "rules"
     assert "轨道之外" in promo.headline
+
+
+def test_agent_run_record_is_user_scoped_and_preserves_explainable_trace():
+    original_base_dir = settings.base_dir
+    with TemporaryDirectory() as temp_dir:
+        try:
+            settings.base_dir = Path(temp_dir)
+            record = record_agent_run(
+                user_id="actor-a",
+                agent="script-rag",
+                action="剧本证据问答",
+                script_id="a" * 32,
+                script_title="轨道之外",
+                mode="检索:rules / 回答:rules",
+                summary="返回 1 条可核对证据。",
+                trace=[AgentStep(
+                    name="检索相关证据",
+                    status="completed",
+                    summary="命中原文第 3 行。",
+                    output_count=1,
+                )],
+                warnings=[],
+                status=outcome_status(engine="rules"),
+                duration_ms=12,
+            )
+
+            restored = get_agent_run(record.run_id, user_id="actor-a")
+            assert restored is not None
+            assert restored.trace[0].output_count == 1
+            assert restored.script_title == "轨道之外"
+            assert get_agent_run(record.run_id, user_id="actor-b") is None
+            assert [item.run_id for item in list_agent_runs(user_id="actor-a")] == [record.run_id]
+        finally:
+            settings.base_dir = original_base_dir

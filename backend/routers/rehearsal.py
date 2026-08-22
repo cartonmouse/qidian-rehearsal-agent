@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 from typing import Literal
 from uuid import uuid4
 
@@ -22,6 +23,7 @@ from backend.rehearsal.motto_agent import MottoAgent
 from backend.rehearsal.promo_agent import PromoCopyAgent
 from backend.rehearsal.rag_agent import ScriptRagAgent
 from backend.rehearsal.resource_agent import ResourceAgent, room_booking_conflicts
+from backend.rehearsal.run_log import outcome_status, record_agent_run
 from backend.rehearsal.schedule_agent import RehearsalScheduleAgent
 from backend.rehearsal.stage_agent import StageVisualizationAgent
 from backend.rehearsal.suggestion_agent import SuggestionInboxAgent
@@ -29,6 +31,8 @@ from backend.rehearsal.version_diff import ScriptVersionDiffAgent
 from backend.rehearsal.models import (
     AvailabilitySlot,
     AvailabilityUpdateRequest,
+    AgentRunRecord,
+    AgentStep,
     BudgetLineItem,
     BudgetUpdateRequest,
     Character,
@@ -74,6 +78,7 @@ from backend.rehearsal.models import (
 from backend.rehearsal.storage import (
     delete_schedule,
     get_availability,
+    get_agent_run,
     get_budget_items,
     get_feedback,
     get_inventory,
@@ -84,6 +89,7 @@ from backend.rehearsal.storage import (
     get_script,
     get_suggestion,
     list_feedback,
+    list_agent_runs,
     list_room_bookings,
     list_logs,
     list_scripts,
@@ -265,6 +271,60 @@ def _clean_labels(values: list[str]) -> list[str]:
     return result
 
 
+def _elapsed_ms(started: float) -> int:
+    return max(0, round((perf_counter() - started) * 1000))
+
+
+def _schedule_trace(draft: ScheduleDraft, *, planned: bool) -> list[AgentStep]:
+    """Turn scheduling decisions into a compact, human-readable trace."""
+    scheduled = sum(task.status == "scheduled" for task in draft.tasks)
+    unassigned = [task for task in draft.tasks if task.status == "unassigned"]
+    trace = [
+        AgentStep(
+            name="检查人工确认门槛",
+            status="completed",
+            summary=(
+                "剧本已确认，可生成正式调度。"
+                if draft.review_status != "pending"
+                else "当前为预览模式，保留人工确认门槛。"
+            ),
+            output_count=1,
+        ),
+        AgentStep(
+            name="生成场次任务",
+            status="completed",
+            summary=f"把 {len(draft.tasks)} 个场次转成排练任务。",
+            output_count=len(draft.tasks),
+        ),
+        AgentStep(
+            name="识别并行任务组",
+            status="completed",
+            summary=f"按演员与道具资源冲突分成 {len({task.parallel_group for task in draft.tasks})} 组。",
+            output_count=len({task.parallel_group for task in draft.tasks}),
+        ),
+    ]
+    if planned:
+        trace.extend([
+            AgentStep(
+                name="匹配演员可用时间",
+                status="completed" if scheduled else "repaired",
+                summary=f"完成 {scheduled} 个任务的共同档期匹配。",
+                output_count=scheduled,
+            ),
+            AgentStep(
+                name="解释未排班结果",
+                status="repaired" if unassigned else "completed",
+                summary=(
+                    f"有 {len(unassigned)} 个任务保留未排班状态，并写入具体原因。"
+                    if unassigned
+                    else "所有任务都已找到共同可用时间。"
+                ),
+                output_count=len(unassigned),
+            ),
+        ])
+    return trace
+
+
 def _rebuild_summaries(analysis: ScriptAnalysis) -> None:
     """Recompute downstream scheduling inputs after human metadata edits."""
     characters: dict[str, Character] = {}
@@ -296,6 +356,7 @@ def _analyze(
     source_filename: str | None = None,
     analysis_mode: Literal["auto", "rules", "llm"] = "auto",
 ):
+    started = perf_counter()
     analysis = ScriptAnalysisAgent().run(
         title=title,
         version_label=version_label,
@@ -307,7 +368,43 @@ def _analyze(
     if source_filename:
         analysis.warnings.insert(0, f"来源文件：{source_filename}")
     save_script(analysis, user_id=user_id)
+    record_agent_run(
+        user_id=user_id,
+        agent="script-analysis",
+        action="剧本结构化解析",
+        script_id=analysis.script_id,
+        script_title=analysis.title,
+        mode=f"{analysis_mode} → {analysis.analysis_mode}",
+        status=outcome_status(warnings=analysis.warnings),
+        summary=(
+            f"识别 {len(analysis.scenes)} 场、{len(analysis.characters)} 个角色、"
+            f"{len(analysis.props)} 个道具和 {sum(len(scene.lines) for scene in analysis.scenes)} 句台词。"
+        ),
+        trace=analysis.trace,
+        warnings=analysis.warnings,
+        duration_ms=_elapsed_ms(started),
+    )
     return analysis
+
+
+@router.get("/agent-runs", response_model=list[AgentRunRecord])
+def read_agent_runs(
+    limit: int = Query(default=50, ge=1, le=200),
+    user_id: str = Depends(get_current_user),
+):
+    """List recent inspectable Agent runs for the current user."""
+    return list_agent_runs(user_id=user_id, limit=limit)
+
+
+@router.get("/agent-runs/{run_id}", response_model=AgentRunRecord)
+def read_agent_run(run_id: str, user_id: str = Depends(get_current_user)):
+    try:
+        record = get_agent_run(run_id, user_id=user_id)
+    except ValueError:
+        raise HTTPException(400, "无效的 Agent 运行记录 ID")
+    if record is None:
+        raise HTTPException(404, "Agent 运行记录不存在")
+    return record
 
 
 @router.post("/scripts/parse", response_model=ScriptAnalysis)
@@ -454,7 +551,47 @@ def query_script_rag(
         raise HTTPException(400, "无效的剧本 ID")
     if analysis is None:
         raise HTTPException(404, "剧本解析结果不存在")
-    return ScriptRagAgent().answer(analysis, request, user_id=user_id)
+    started = perf_counter()
+    response = ScriptRagAgent().answer(analysis, request, user_id=user_id)
+    warnings: list[str] = []
+    if response.retrieval_engine == "rules-fallback":
+        warnings.append("语义检索不可用，已回退到规则检索。")
+    if response.engine == "fallback":
+        warnings.append(response.note)
+    trace = [
+        AgentStep(
+            name="构建剧本证据块",
+            status="completed",
+            summary=f"从 {len(analysis.scenes)} 个场次构建可回指的场景、台词和舞台提示。",
+            output_count=len(analysis.scenes),
+        ),
+        AgentStep(
+            name="检索相关证据",
+            status="repaired" if response.retrieval_engine == "rules-fallback" else "completed",
+            summary=f"使用 {response.retrieval_engine} 检索，返回 {len(response.evidence)} 条证据。",
+            output_count=len(response.evidence),
+        ),
+        AgentStep(
+            name="组织带引用回答",
+            status="repaired" if response.engine == "fallback" else "completed",
+            summary=f"使用 {response.engine} 生成回答，并保留证据 ID。",
+            output_count=1 if response.answer else 0,
+        ),
+    ]
+    record_agent_run(
+        user_id=user_id,
+        agent="script-rag",
+        action="剧本证据问答",
+        script_id=analysis.script_id,
+        script_title=analysis.title,
+        mode=f"检索:{request.retrieval_mode} / 回答:{request.answer_mode}",
+        status=("fallback" if warnings else "completed"),
+        summary=f"围绕“{request.question}”返回 {len(response.evidence)} 条可核对证据。",
+        trace=trace,
+        warnings=warnings,
+        duration_ms=_elapsed_ms(started),
+    )
+    return response
 
 
 @router.put("/scripts/{script_id}/review", response_model=ScriptAnalysis)
@@ -509,6 +646,7 @@ def create_schedule_draft(
         raise HTTPException(400, "无效的剧本 ID")
     if analysis is None:
         raise HTTPException(404, "剧本解析结果不存在")
+    started = perf_counter()
     try:
         draft = RehearsalScheduleAgent().run(
             analysis,
@@ -518,6 +656,18 @@ def create_schedule_draft(
     except ValueError as exc:
         raise HTTPException(409, str(exc))
     save_schedule(draft, user_id=user_id)
+    record_agent_run(
+        user_id=user_id,
+        agent="schedule-draft",
+        action="生成排练调度草案",
+        script_id=analysis.script_id,
+        script_title=analysis.title,
+        mode="预览" if request.preview else "正式",
+        summary=f"生成 {len(draft.tasks)} 个场次任务，划分 {len({task.parallel_group for task in draft.tasks})} 个并行组。",
+        trace=_schedule_trace(draft, planned=False),
+        warnings=[],
+        duration_ms=_elapsed_ms(started),
+    )
     return draft
 
 
@@ -545,6 +695,7 @@ def plan_schedule(
         raise HTTPException(400, "无效的剧本 ID")
     if analysis is None:
         raise HTTPException(404, "剧本解析结果不存在")
+    started = perf_counter()
     try:
         draft = get_schedule(script_id, user_id=user_id)
         if draft is None:
@@ -553,6 +704,22 @@ def plan_schedule(
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     save_schedule(planned, user_id=user_id)
+    unassigned = [task for task in planned.tasks if task.status == "unassigned"]
+    record_agent_run(
+        user_id=user_id,
+        agent="schedule-plan",
+        action="匹配演员档期",
+        script_id=analysis.script_id,
+        script_title=analysis.title,
+        mode="共同空闲时间匹配",
+        summary=(
+            f"已排 {len(planned.tasks) - len(unassigned)} 个任务；"
+            f"{len(unassigned)} 个任务保留未排班及原因。"
+        ),
+        trace=_schedule_trace(planned, planned=True),
+        warnings=[task.unassigned_reason or "" for task in unassigned],
+        duration_ms=_elapsed_ms(started),
+    )
     return planned
 
 
@@ -569,10 +736,52 @@ def line_reading(
         raise HTTPException(400, "无效的剧本 ID")
     if analysis is None:
         raise HTTPException(404, "剧本解析结果不存在")
+    started = perf_counter()
     try:
-        return LineReadingAgent().respond(analysis, request, user_id=user_id)
+        response = LineReadingAgent().respond(analysis, request, user_id=user_id)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
+    warnings = [response.note] if response.engine == "fallback" and response.note else []
+    record_agent_run(
+        user_id=user_id,
+        agent="line-reading",
+        action="推进角色对词",
+        script_id=analysis.script_id,
+        script_title=analysis.title,
+        mode=request.mode,
+        status=outcome_status(engine=response.engine, warnings=warnings),
+        summary=(
+            f"为角色“{response.character}”推进到第 {response.next_line_index + 1 if response.next_line_index is not None else '末句'} 个台词位置，"
+            f"返回 {len(response.assistant_turns)} 个搭词提示。"
+        ),
+        trace=[
+            AgentStep(
+                name="校验角色与场次",
+                status="completed",
+                summary=f"确认角色“{response.character}”属于《{response.scene_title}》当前场次。",
+                output_count=1,
+            ),
+            AgentStep(
+                name="选择对词策略",
+                status="repaired" if response.engine == "fallback" else "completed",
+                summary=f"使用 {response.mode} 模式和 {response.engine} 引擎推进对话。",
+                output_count=len(response.assistant_turns),
+            ),
+            AgentStep(
+                name="回指下一句原台词",
+                status="completed",
+                summary=(
+                    f"下一句台词位于原剧本第 {response.actor_prompt.source_line} 行。"
+                    if response.actor_prompt
+                    else "当前场次对词已完成。"
+                ),
+                output_count=1 if response.actor_prompt else 0,
+            ),
+        ],
+        warnings=warnings,
+        duration_ms=_elapsed_ms(started),
+    )
+    return response
 
 
 @router.post("/feedback", response_model=RehearsalFeedbackResponse)

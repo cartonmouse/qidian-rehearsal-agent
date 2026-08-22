@@ -36,6 +36,7 @@ import VersionTracking from "./pages/VersionTracking";
 import StageVisualization from "./pages/StageVisualization";
 import ResourceManagement from "./pages/ResourceManagement";
 import ResourceFinance from "./pages/ResourceFinance";
+import AgentRuns from "./pages/AgentRuns";
 
 // 简历模块体量大(编辑器 + 9 套模板),按需加载避免拖慢首屏
 const ResumeManager = lazy(() => import("./pages/ResumeManager"));
@@ -115,6 +116,7 @@ function AppRoutes() {
                 <Route path="/rehearsal/stage" element={<StageVisualization />} />
                 <Route path="/rehearsal/resources" element={<ResourceManagement />} />
                 <Route path="/rehearsal/resource-finance" element={<ResourceFinance />} />
+                <Route path="/rehearsal/runs" element={<AgentRuns />} />
                 <Route path="/profile/topic/:topic" element={<TopicDetail />} />
                 <Route path="/knowledge" element={<Knowledge />} />
                 <Route path="/graph" element={<Graph />} />

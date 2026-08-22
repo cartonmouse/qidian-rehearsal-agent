@@ -60,6 +60,23 @@ class AgentStep(BaseModel):
     output_count: int = Field(default=0, ge=0)
 
 
+class AgentRunRecord(BaseModel):
+    """A persisted, user-scoped run summary for an inspectable rehearsal Agent."""
+
+    run_id: str
+    agent: Literal["script-analysis", "schedule-draft", "schedule-plan", "line-reading", "script-rag"]
+    action: str
+    script_id: str | None = None
+    script_title: str = ""
+    mode: str = ""
+    status: Literal["completed", "fallback", "failed"] = "completed"
+    summary: str
+    trace: list[AgentStep] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    duration_ms: int = Field(default=0, ge=0)
+    created_at: str
+
+
 class ScriptParseRequest(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     version_label: str = Field(default="v1", min_length=1, max_length=50)
