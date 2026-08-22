@@ -51,6 +51,8 @@ export interface AgentStep {
 
 export interface AgentRunRecord {
   run_id: string;
+  parent_run_id: string | null;
+  root_run_id: string | null;
   agent: "script-analysis" | "schedule-draft" | "schedule-plan" | "line-reading" | "script-rag" | "resource-check";
   action: string;
   script_id: string | null;
@@ -302,6 +304,9 @@ export interface ScheduleDraft {
   script_id: string;
   review_status: "pending" | "confirmed" | "edited";
   is_preview: boolean;
+  agent_run_id: string | null;
+  parent_run_id: string | null;
+  root_run_id: string | null;
   tasks: ScheduleTask[];
   tool_calls: ScheduleToolCall[];
   created_at: string;

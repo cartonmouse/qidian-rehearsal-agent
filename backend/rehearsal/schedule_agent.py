@@ -31,6 +31,9 @@ class RehearsalScheduleAgent:
         *,
         default_minutes: int = 45,
         preview: bool = False,
+        agent_run_id: str | None = None,
+        parent_run_id: str | None = None,
+        root_run_id: str | None = None,
     ) -> ScheduleDraft:
         if analysis.review_status == "pending" and not preview:
             raise ValueError("剧本尚未完成人工确认，不能生成排练调度")
@@ -146,6 +149,9 @@ class RehearsalScheduleAgent:
             script_id=analysis.script_id,
             review_status=analysis.review_status,
             is_preview=preview,
+            agent_run_id=agent_run_id,
+            parent_run_id=parent_run_id,
+            root_run_id=root_run_id or agent_run_id,
             tasks=tasks,
             tool_calls=tool_calls,
             created_at=datetime.now(timezone.utc).isoformat(),
@@ -155,6 +161,10 @@ class RehearsalScheduleAgent:
         self,
         draft: ScheduleDraft,
         slots: list[AvailabilitySlot],
+        *,
+        agent_run_id: str | None = None,
+        parent_run_id: str | None = None,
+        root_run_id: str | None = None,
     ) -> ScheduleDraft:
         """Assign tasks to the earliest common free interval for all actors."""
         slots_by_actor: dict[str, list[tuple[str, int, int]]] = defaultdict(list)
@@ -252,7 +262,12 @@ class RehearsalScheduleAgent:
             ),
         )
 
+        resolved_parent_run_id = parent_run_id if parent_run_id is not None else draft.agent_run_id
+        resolved_root_run_id = root_run_id or draft.root_run_id or draft.agent_run_id or agent_run_id
         return draft.model_copy(update={
+            "agent_run_id": agent_run_id or draft.agent_run_id,
+            "parent_run_id": resolved_parent_run_id,
+            "root_run_id": resolved_root_run_id,
             "tasks": planned,
             "tool_calls": tool_calls,
             "created_at": datetime.now(timezone.utc).isoformat(),

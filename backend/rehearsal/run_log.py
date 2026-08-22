@@ -31,9 +31,15 @@ def record_agent_run(
     warnings: list[str] | None = None,
     status: str = "completed",
     duration_ms: int = 0,
+    run_id: str | None = None,
+    parent_run_id: str | None = None,
+    root_run_id: str | None = None,
 ) -> AgentRunRecord:
+    resolved_run_id = run_id or uuid4().hex
     record = AgentRunRecord(
-        run_id=uuid4().hex,
+        run_id=resolved_run_id,
+        parent_run_id=parent_run_id,
+        root_run_id=root_run_id or (parent_run_id or resolved_run_id),
         agent=agent,  # type: ignore[arg-type]
         action=action,
         script_id=script_id,

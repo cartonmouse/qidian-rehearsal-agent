@@ -64,6 +64,8 @@ class AgentRunRecord(BaseModel):
     """A persisted, user-scoped run summary for an inspectable rehearsal Agent."""
 
     run_id: str
+    parent_run_id: str | None = None
+    root_run_id: str | None = None
     agent: Literal["script-analysis", "schedule-draft", "schedule-plan", "line-reading", "script-rag", "resource-check"]
     action: str
     script_id: str | None = None
@@ -1024,6 +1026,9 @@ class ScheduleDraft(BaseModel):
     script_id: str
     review_status: Literal["pending", "confirmed", "edited"]
     is_preview: bool = False
+    agent_run_id: str | None = None
+    parent_run_id: str | None = None
+    root_run_id: str | None = None
     tasks: list[ScheduleTask] = Field(default_factory=list)
     tool_calls: list[ScheduleToolCall] = Field(default_factory=list)
     created_at: str

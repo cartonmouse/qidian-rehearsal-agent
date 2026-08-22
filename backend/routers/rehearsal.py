@@ -781,11 +781,14 @@ def create_schedule_draft(
     if analysis is None:
         raise HTTPException(404, "剧本解析结果不存在")
     started = perf_counter()
+    run_id = uuid4().hex
     try:
         draft = RehearsalScheduleAgent().run(
             analysis,
             default_minutes=request.default_minutes,
             preview=request.preview,
+            agent_run_id=run_id,
+            root_run_id=run_id,
         )
     except ValueError as exc:
         raise HTTPException(409, str(exc))
@@ -801,6 +804,8 @@ def create_schedule_draft(
         trace=_schedule_trace(draft, planned=False),
         warnings=[],
         duration_ms=_elapsed_ms(started),
+        run_id=run_id,
+        root_run_id=run_id,
     )
     return draft
 
@@ -830,11 +835,40 @@ def plan_schedule(
     if analysis is None:
         raise HTTPException(404, "剧本解析结果不存在")
     started = perf_counter()
+    plan_run_id = uuid4().hex
     try:
         draft = get_schedule(script_id, user_id=user_id)
         if draft is None:
-            draft = RehearsalScheduleAgent().run(analysis)
-        planned = RehearsalScheduleAgent().assign(draft, request.slots)
+            draft_run_id = uuid4().hex
+            draft = RehearsalScheduleAgent().run(
+                analysis,
+                agent_run_id=draft_run_id,
+                root_run_id=draft_run_id,
+            )
+            save_schedule(draft, user_id=user_id)
+            record_agent_run(
+                user_id=user_id,
+                agent="schedule-draft",
+                action="补生成排练调度草案",
+                script_id=analysis.script_id,
+                script_title=analysis.title,
+                mode="自动排班前补生成",
+                summary=f"为自动排班补生成 {len(draft.tasks)} 个场次任务。",
+                trace=_schedule_trace(draft, planned=False),
+                warnings=[],
+                duration_ms=0,
+                run_id=draft_run_id,
+                root_run_id=draft_run_id,
+            )
+        parent_run_id = draft.agent_run_id
+        root_run_id = draft.root_run_id or parent_run_id or plan_run_id
+        planned = RehearsalScheduleAgent().assign(
+            draft,
+            request.slots,
+            agent_run_id=plan_run_id,
+            parent_run_id=parent_run_id,
+            root_run_id=root_run_id,
+        )
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     save_schedule(planned, user_id=user_id)
@@ -853,6 +887,9 @@ def plan_schedule(
         trace=_schedule_trace(planned, planned=True),
         warnings=[task.unassigned_reason or "" for task in unassigned],
         duration_ms=_elapsed_ms(started),
+        run_id=plan_run_id,
+        parent_run_id=planned.parent_run_id,
+        root_run_id=planned.root_run_id,
     )
     return planned
 

@@ -88,6 +88,13 @@ export default function AgentRuns() {
   const averageDuration = runs.length
     ? Math.round(runs.reduce((total, item) => total + item.duration_ms, 0) / runs.length)
     : 0;
+  const linkedRuns = useMemo(() => {
+    if (!selected) return [];
+    const rootId = selected.root_run_id || selected.run_id;
+    return runs
+      .filter((item) => (item.root_run_id || item.run_id) === rootId)
+      .sort((left, right) => left.created_at.localeCompare(right.created_at));
+  }, [runs, selected]);
 
   return (
     <div className={cn(PAGE_CLASS, "space-y-4")}>
@@ -210,6 +217,30 @@ export default function AgentRuns() {
                     ))}
                   </div>
                 </section>
+
+                {linkedRuns.length > 1 && (
+                  <section className="rounded-xl border border-primary/20 bg-primary/5 p-4">
+                    <div className="flex items-center gap-2 text-sm font-medium text-text"><Workflow size={16} className="text-primary" />关联运行链</div>
+                    <p className="mt-1 text-xs leading-5 text-dim">同一条任务链中的 Agent 运行通过根运行 ID 关联；父运行表示当前步骤依赖的上游结果。</p>
+                    <div className="mt-3 space-y-2">
+                      {linkedRuns.map((run, index) => (
+                        <button
+                          key={run.run_id}
+                          type="button"
+                          onClick={() => setSelectedId(run.run_id)}
+                          className={cn("flex w-full items-center gap-3 rounded-lg border border-border/70 bg-background/30 px-3 py-2 text-left hover:bg-hover", run.run_id === selected.run_id && "border-primary/40 bg-primary/10")}
+                        >
+                          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] text-primary">{index + 1}</span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-xs font-medium text-text">{AGENT_LABELS[run.agent]} · {run.action}</span>
+                            <span className="mt-0.5 block truncate font-mono text-[10px] text-dim">{run.run_id}</span>
+                          </span>
+                          <span className={cn("rounded-full border px-2 py-0.5 text-[10px]", statusClass(run.status))}>{STATUS_LABELS[run.status]}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )}
 
                 {selected.warnings.length > 0 && (
                   <section className="rounded-xl border border-amber-300/25 bg-amber-300/8 p-4">

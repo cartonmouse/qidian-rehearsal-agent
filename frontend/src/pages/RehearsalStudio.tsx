@@ -706,6 +706,12 @@ export default function RehearsalStudio() {
                           <span className="rounded-full bg-teal/10 px-2.5 py-1 text-teal">{new Set(schedule.tasks.map((task) => task.parallel_group)).size} 个并行组</span>
                           <span className="rounded-full bg-orange/10 px-2.5 py-1 text-orange">{schedule.tool_calls?.length ?? 0} 次工具调用</span>
                         </div>
+                        {schedule.agent_run_id && (
+                          <div className="flex flex-wrap gap-2 text-[11px] text-dim">
+                            <span className="rounded-full border border-primary/20 bg-primary/5 px-2.5 py-1">当前 Run · {schedule.agent_run_id}</span>
+                            {schedule.parent_run_id && <span className="rounded-full border border-border/70 bg-background/30 px-2.5 py-1">上游 Run · {schedule.parent_run_id}</span>}
+                          </div>
+                        )}
                         {(schedule.tool_calls?.length ?? 0) > 0 && (
                           <div className="rounded-xl border border-border bg-background/35 p-3">
                             <div className="flex items-center gap-2 text-xs font-semibold">

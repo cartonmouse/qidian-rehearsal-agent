@@ -81,11 +81,12 @@ LLM 回答必须引用检索结果中的证据 ID，并通过 Pydantic 校验；
 `GET /api/rehearsal/agent-runs?limit=50` 提供一条独立的可观察性入口，当前覆盖剧本解析、调度草案、自动排班、对词、资源检查和剧本问答六类运行。每条 `AgentRunRecord` 保存：
 
 - Agent 类型、动作、绑定剧本和运行模式；
+- `run_id`、`parent_run_id` 和 `root_run_id`：用于把依赖同一任务的多个 Agent 运行串成一条链；当前调度草案是自动排班的父运行；
 - `completed`、`fallback` 或 `failed` 状态，以及后端耗时；
 - 结构化 `trace`：每个步骤的名称、状态、摘要和产出数量；
 - 降级或未排班等需要关注的原因。
 
-运行记录只保存结构化摘要，不把完整剧本、API Key 或模型原始响应写进审计记录；路径仍通过当前用户 ID 隔离。`GET /api/rehearsal/agent-runs/{run_id}` 可读取单次详情，前端“Agent运行记录”页面用它展示 Agent 的执行轨迹。这使得项目可以回答“Agent 经过了哪些步骤、哪一步使用了规则或模型、为什么没有直接给出结果”，而不是只展示最终 JSON。
+运行记录只保存结构化摘要，不把完整剧本、API Key 或模型原始响应写进审计记录；路径仍通过当前用户 ID 隔离。`GET /api/rehearsal/agent-runs/{run_id}` 可读取单次详情，前端“Agent运行记录”页面会按 `root_run_id` 展示同一任务链。这使得项目可以回答“Agent 经过了哪些步骤、哪一步使用了规则或模型、为什么没有直接给出结果”，并能继续追问“自动排班依赖了哪个调度草案”，而不是只展示最终 JSON。
 
 `GET /api/rehearsal/agent-runs/metrics?window_days=30` 由运行指标 Agent 聚合当前用户的完成、降级、失败、平均耗时和按 Agent 分布，并列出 trace 中出现频率最高的失败步骤。窗口限制为 7 到 365 天，失败率只统计 `status=failed`，不会把正常降级算成失败。LLM Chat 客户端对连接超时、限流和 5xx 等可重试错误最多执行 2 次，重试成功会在解析 warning、对词 note 或 RAG note 中留下记录；资源写入接口不使用自动重试，避免重复预约或重复保存。
 

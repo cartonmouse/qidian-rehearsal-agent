@@ -119,10 +119,24 @@ def _evaluate_script_analysis(case: dict[str, Any], checks: list[CheckResult]) -
 def _evaluate_schedule(case: dict[str, Any], checks: list[CheckResult]) -> None:
     analysis = _analysis(case).model_copy(update={"review_status": case.get("review_status", "confirmed")})
     agent = RehearsalScheduleAgent()
-    draft = agent.run(analysis, default_minutes=int(case.get("default_minutes", 45)))
-    slots = [AvailabilitySlot(**payload) for payload in case.get("slots", [])]
-    planned = agent.assign(draft, slots)
     expected = case["expected"]
+    linkage = expected.get("run_linkage", {})
+    draft_run_id = linkage.get("draft_run_id")
+    plan_run_id = linkage.get("plan_run_id")
+    draft = agent.run(
+        analysis,
+        default_minutes=int(case.get("default_minutes", 45)),
+        agent_run_id=draft_run_id,
+        root_run_id=draft_run_id,
+    )
+    slots = [AvailabilitySlot(**payload) for payload in case.get("slots", [])]
+    planned = agent.assign(
+        draft,
+        slots,
+        agent_run_id=plan_run_id,
+        parent_run_id=draft_run_id,
+        root_run_id=draft_run_id,
+    )
     statuses = [task.status for task in planned.tasks]
     _check(checks, "task_count", len(planned.tasks), expected.get("task_count"))
     _check(checks, "scheduled_count", statuses.count("scheduled"), expected.get("scheduled_count"))
@@ -146,6 +160,11 @@ def _evaluate_schedule(case: dict[str, Any], checks: list[CheckResult]) -> None:
         reasons = [task.unassigned_reason or "" for task in planned.tasks if task.status == "unassigned"]
         found = any(expected["unassigned_reason_contains"] in reason for reason in reasons)
         _check(checks, "unassigned_reason_contains", found, True, passed=found)
+    if linkage:
+        _check(checks, "draft_run_id", draft.agent_run_id, draft_run_id)
+        _check(checks, "plan_run_id", planned.agent_run_id, plan_run_id)
+        _check(checks, "parent_run_id", planned.parent_run_id, draft_run_id)
+        _check(checks, "root_run_id", planned.root_run_id, draft_run_id)
 
 
 def _evaluate_resource_check(case: dict[str, Any], checks: list[CheckResult]) -> None:

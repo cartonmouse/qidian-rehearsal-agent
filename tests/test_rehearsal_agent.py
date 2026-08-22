@@ -250,6 +250,18 @@ def test_schedule_agent_exposes_an_inspectable_tool_call_workflow():
         "unassigned_count": 0,
         "overlap_count": 0,
     }
+    linked_draft = agent.run(analysis, default_minutes=45, agent_run_id="1" * 32, root_run_id="1" * 32)
+    linked_plan = agent.assign(
+        linked_draft,
+        [AvailabilitySlot(actor="小林", date="2026-08-25", start="19:00", end="21:00")],
+        agent_run_id="2" * 32,
+        parent_run_id=linked_draft.agent_run_id,
+        root_run_id=linked_draft.root_run_id,
+    )
+    assert linked_draft.agent_run_id == "1" * 32
+    assert linked_plan.agent_run_id == "2" * 32
+    assert linked_plan.parent_run_id == "1" * 32
+    assert linked_plan.root_run_id == "1" * 32
 
 
 def test_line_reading_follows_selected_role_and_source_lines():
@@ -1156,8 +1168,27 @@ def test_agent_run_record_is_user_scoped_and_preserves_explainable_trace():
             assert restored is not None
             assert restored.trace[0].output_count == 1
             assert restored.script_title == "轨道之外"
+            assert restored.parent_run_id is None
+            assert restored.root_run_id == record.run_id
             assert get_agent_run(record.run_id, user_id="actor-b") is None
             assert [item.run_id for item in list_agent_runs(user_id="actor-a")] == [record.run_id]
+
+            child = record_agent_run(
+                user_id="actor-a",
+                agent="schedule-plan",
+                action="匹配演员档期",
+                script_id="a" * 32,
+                script_title="轨道之外",
+                mode="共同空闲时间匹配",
+                summary="完成排班。",
+                trace=[],
+                parent_run_id=record.run_id,
+                root_run_id=record.root_run_id,
+                run_id="b" * 32,
+            )
+            assert child.parent_run_id == record.run_id
+            assert child.root_run_id == record.run_id
+            assert [item.run_id for item in list_agent_runs(user_id="actor-a")] == [child.run_id, record.run_id]
         finally:
             settings.base_dir = original_base_dir
 

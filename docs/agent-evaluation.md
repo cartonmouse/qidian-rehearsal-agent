@@ -9,7 +9,7 @@
 | 用例 | 验证内容 |
 | --- | --- |
 | `script-analysis-basic` | 场次、角色、道具、trace 和原文行号是否完整 |
-| `schedule-feasible` | 已确认剧本能生成任务，并按共享演员资源拆分并行组、连续排班 |
+| `schedule-feasible` | 已确认剧本能生成任务，并按共享演员资源拆分并行组、连续排班；草案 Run 与排班 Run 保留父子关系 |
 | `schedule-unassigned` | 演员没有共同时间时，任务标记为未排班并给出具体原因 |
 | `resource-check-scene` | 道具库存的已就绪、维修中、缺失状态和解释是否正确 |
 | `rag-evidence-and-no-hallucination` | RAG 是否返回带原文行号的证据，且回答引用证据 ID |
@@ -36,4 +36,4 @@ python -m evals.run_rehearsal_evals
 2. 把正常路径、边界路径和拒答路径放进同一套回归；“没有共同时间”和“没有证据”不是异常，而是产品必须解释的结果。
 3. 评估集不绑定供应商 API。规则路径可在 CI 中稳定运行，LLM 路径可以在后续增加带 mock provider 的合同测试和离线样本评估。
 
-后续扩展方向是加入人工确认修改、版本差异下游影响、资源审计匹配和适应性对词的 mock provider 合同测试，并把更多 Agent 之间的运行轨迹关联纳入评估断言。
+后续扩展方向是加入人工确认修改、版本差异下游影响、资源审计匹配和适应性对词的 mock provider 合同测试，并把更多真实剧本样本纳入评估。

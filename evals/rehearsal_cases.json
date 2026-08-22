@@ -46,7 +46,11 @@
         "validate_schedule"
       ],
       "first_task_end_equals_second_start": true,
-      "second_task_reason_contains": "共享资源"
+      "second_task_reason_contains": "共享资源",
+      "run_linkage": {
+        "draft_run_id": "11111111111111111111111111111111",
+        "plan_run_id": "22222222222222222222222222222222"
+      }
     }
   },
   {
