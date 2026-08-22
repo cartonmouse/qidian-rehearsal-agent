@@ -45,6 +45,24 @@
         "find_common_actor_slot",
         "validate_schedule"
       ],
+      "tool_phases": [
+        "inspect",
+        "extract",
+        "extract",
+        "group",
+        "validate",
+        "assign",
+        "assign",
+        "validate"
+      ],
+      "tool_result_keys_by_name": {
+        "inspect_script": ["review_gate"],
+        "extract_scene_requirements": ["required_characters", "props", "estimated_minutes"],
+        "group_parallel_tasks": ["parallel_group_count", "groups"],
+        "validate_schedule_draft": ["draft_valid", "unassigned_count"],
+        "find_common_actor_slot": ["status", "date", "start", "end"],
+        "validate_schedule": ["scheduled_count", "unassigned_count", "overlap_count"]
+      },
       "first_task_end_equals_second_start": true,
       "second_task_reason_contains": "共享资源",
       "run_linkage": {
@@ -213,10 +231,19 @@
         }
       },
       "adaptive": {
-        "turns": [
-          {"character": "导演", "text": "先别急着解释，把你的犹豫留在门外。"}
-        ],
-        "note": "保持停顿，再进入下一句。"
+        "导演": {
+          "turns": [
+            {"character": "导演", "text": "先别急着解释，把你的犹豫留在门外。"}
+          ],
+          "note": "保持停顿，再进入下一句。"
+        },
+        "许教授": {
+          "turns": [
+            {"character": "许教授", "text": "先把这句话说完，再决定要不要转身。"},
+            {"character": "小周", "text": "我会把停顿留给你，然后再按下计时器。"}
+          ],
+          "note": "让回应接住对方的停顿。"
+        }
       }
     },
     "expected": {
@@ -224,7 +251,7 @@
       "scene_numbers": [1, 2],
       "character_names": ["导演", "小林", "许教授", "小周"],
       "props_include": ["椅子", "手电筒", "信封", "纸条", "手机"],
-      "mock_call_count": 3,
+      "mock_call_count": 5,
       "anchored_line": {
         "scene_number": 1,
         "character": "导演",
@@ -234,7 +261,15 @@
       "adaptive_engine": "llm",
       "adaptive_characters": ["导演"],
       "adaptive_source_lines": [7],
-      "adaptive_texts": ["先别急着解释，把你的犹豫留在门外。"]
+      "adaptive_texts": ["先别急着解释，把你的犹豫留在门外。"],
+      "session": {
+        "user_text": "我总觉得这封信不是写给我的。",
+        "cursor": 4,
+        "turn_count": 2,
+        "transcript_kinds": ["partner", "actor", "partner", "partner", "feedback"],
+        "engine_counts": {"llm": 2},
+        "partner_source_lines": [11, 15]
+      }
     }
   }
 ]

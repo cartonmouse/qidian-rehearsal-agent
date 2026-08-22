@@ -33,7 +33,14 @@ class ContractMockLLM:
                 raise AssertionError("mock scene fixture is missing for the requested scene")
             payload = self.scenes[match.group(1)]
         elif "对词搭档" in system:
-            payload = self.adaptive
+            if "turns" in self.adaptive:
+                payload = self.adaptive
+            else:
+                prompt = messages[-1].get("content", "") if messages else ""
+                match = re.search(r'"character":\s*"([^"]+)"', prompt)
+                if not match or match.group(1) not in self.adaptive:
+                    raise AssertionError("mock adaptive fixture is missing for the requested partner")
+                payload = self.adaptive[match.group(1)]
         else:
             raise AssertionError("unexpected system prompt in LLM contract evaluation")
         return json.dumps(payload, ensure_ascii=False)

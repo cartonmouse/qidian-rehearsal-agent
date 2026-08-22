@@ -146,6 +146,28 @@ def _evaluate_llm_contract(case: dict[str, Any], checks: list[CheckResult]) -> N
                 user_text=str(case.get("user_text", "")),
             ),
         )
+        session_agent = LineReadingSessionAgent()
+        session_start, session = session_agent.advance(
+            analysis,
+            LineReadingRequest(
+                scene_id=str(case["scene_id"]),
+                character=str(case["character"]),
+                mode="adaptive",
+                line_index=int(case.get("line_index", 0)),
+            ),
+        )
+        session_resume, resumed_session = session_agent.advance(
+            analysis,
+            LineReadingRequest(
+                scene_id=str(case["scene_id"]),
+                character=str(case["character"]),
+                mode="adaptive",
+                line_index=99,
+                user_text=str(case["expected"]["session"]["user_text"]),
+                session_id=session.session_id,
+            ),
+            session=session,
+        )
 
     expected = case["expected"]
     _check(checks, "analysis_mode", analysis.analysis_mode, expected["analysis_mode"])
@@ -199,6 +221,28 @@ def _evaluate_llm_contract(case: dict[str, Any], checks: list[CheckResult]) -> N
         [turn.text for turn in line_response.assistant_turns],
         expected["adaptive_texts"],
     )
+    session_expected = expected["session"]
+    _check(checks, "session_cursor", resumed_session.line_index, session_expected["cursor"])
+    _check(checks, "session_turn_count", resumed_session.turn_count, session_expected["turn_count"])
+    _check(
+        checks,
+        "session_transcript_kinds",
+        [item.kind for item in resumed_session.transcript],
+        session_expected["transcript_kinds"],
+    )
+    _check(checks, "session_engine_counts", resumed_session.engine_counts, session_expected["engine_counts"])
+    _check(
+        checks,
+        "session_id_stable",
+        session_start.session_id == session_resume.session_id == resumed_session.session_id,
+        True,
+    )
+    _check(
+        checks,
+        "session_partner_source_lines",
+        [turn.source_line for turn in session_resume.assistant_turns],
+        session_expected["partner_source_lines"],
+    )
 
 
 def _evaluate_schedule(case: dict[str, Any], checks: list[CheckResult]) -> None:
@@ -228,6 +272,16 @@ def _evaluate_schedule(case: dict[str, Any], checks: list[CheckResult]) -> None:
     _check(checks, "unassigned_count", statuses.count("unassigned"), expected.get("unassigned_count"))
     if "tool_names" in expected:
         _check(checks, "tool_names", [call.tool_name for call in planned.tool_calls], expected["tool_names"])
+    if "tool_phases" in expected:
+        _check(checks, "tool_phases", [call.phase for call in planned.tool_calls], expected["tool_phases"])
+    if "tool_result_keys_by_name" in expected:
+        for tool_name, required_keys in expected["tool_result_keys_by_name"].items():
+            calls = [call for call in planned.tool_calls if call.tool_name == tool_name]
+            contract_ok = bool(calls) and all(
+                set(required_keys).issubset(call.result)
+                for call in calls
+            )
+            _check(checks, f"tool_result_contract:{tool_name}", contract_ok, True, passed=contract_ok)
     if "parallel_groups" in expected:
         _check(checks, "parallel_groups", [task.parallel_group for task in draft.tasks], expected["parallel_groups"])
     if "first_task_end_equals_second_start" in expected and len(planned.tasks) >= 2:
