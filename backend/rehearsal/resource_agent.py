@@ -164,7 +164,10 @@ class ResourceAgent:
         if not requirements:
             warnings.append("当前检查范围没有识别到道具需求；请确认剧本解析或人工确认结果。")
         if any(item.category == "costume" for item in inventory):
-            warnings.append("服装库存已支持人工维护；当前版本尚未从剧本文本自动抽取服装需求。")
+            if analysis.costumes:
+                warnings.append("已读取剧本服装需求；调度 Agent 会继续按库存容量复核服装并行占用。")
+            else:
+                warnings.append("已维护服装库存，但当前剧本没有识别到服装需求；如有换装请在人工确认节点补充。")
         if not inventory_by_name and requirements:
             warnings.append("尚未维护任何道具库存，所有道具都会被标记为缺失。")
         if not scene_id and len(scenes) > 1 and requirements:

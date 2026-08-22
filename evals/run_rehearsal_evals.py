@@ -333,6 +333,14 @@ def _evaluate_schedule(case: dict[str, Any], checks: list[CheckResult]) -> None:
                 for call in calls
             )
             _check(checks, f"tool_result_contract:{tool_name}", contract_ok, True, passed=contract_ok)
+    if "tool_argument_keys_by_name" in expected:
+        for tool_name, required_keys in expected["tool_argument_keys_by_name"].items():
+            calls = [call for call in planned.tool_calls if call.tool_name == tool_name]
+            contract_ok = bool(calls) and all(
+                set(required_keys).issubset(call.arguments)
+                for call in calls
+            )
+            _check(checks, f"tool_argument_contract:{tool_name}", contract_ok, True, passed=contract_ok)
     resource_expected = expected.get("resource_context")
     if resource_expected:
         resource_context = planned.resource_context

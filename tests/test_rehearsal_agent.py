@@ -701,6 +701,60 @@ def test_schedule_agent_respects_costume_inventory_capacity_for_parallel_groups_
         raise AssertionError("three concurrent costume users must exceed capacity two")
 
 
+def test_schedule_agent_reserves_costume_capacity_during_auto_assignment():
+    analysis = ScriptAnalysisAgent().run(
+        title="跨场次服装占用",
+        version_label="v1",
+        script_text=(
+            "第一场\n（林澄穿灰色外套。）\n林澄：开始。\n"
+            "第二场\n（顾言穿灰色外套。）\n顾言：继续。"
+        ),
+        script_id="costume-occupancy",
+        analysis_mode="rules",
+    ).model_copy(update={"review_status": "confirmed"})
+    agent = RehearsalScheduleAgent()
+    single_inventory = [ResourceInventoryItem(
+        resource_id="costume-single",
+        category="costume",
+        name="灰色外套",
+        quantity=1,
+        status="available",
+        location="服装柜",
+    )]
+    draft = agent.run(analysis, inventory=single_inventory)
+    planned = agent.assign(draft, [
+        AvailabilitySlot(actor=actor, date="2026-08-25", start="19:00", end="21:00")
+        for actor in ("林澄", "顾言")
+    ])
+
+    assert [task.parallel_group for task in draft.tasks] == [1, 2]
+    assert [(task.scheduled_start, task.scheduled_end) for task in planned.tasks] == [
+        ("19:00", "19:45"),
+        ("19:45", "20:30"),
+    ]
+    assert all(task.status == "scheduled" for task in planned.tasks)
+    assert any(
+        item["kind"] == "costume" and item["capacity"] == 1
+        for item in planned.tool_calls[-3].arguments["resources"]
+    )
+
+    double_draft = agent.run(analysis, inventory=[single_inventory[0].model_copy(update={"quantity": 2})])
+    double_plan = agent.assign(double_draft, [
+        AvailabilitySlot(actor=actor, date="2026-08-25", start="19:00", end="21:00")
+        for actor in ("林澄", "顾言")
+    ])
+    assert [task.parallel_group for task in double_draft.tasks] == [1, 1]
+    assert [task.scheduled_start for task in double_plan.tasks] == ["19:00", "19:00"]
+
+    short_plan = agent.assign(draft, [
+        AvailabilitySlot(actor=actor, date="2026-08-25", start="19:00", end="20:00")
+        for actor in ("林澄", "顾言")
+    ])
+    assert short_plan.tasks[1].status == "unassigned"
+    assert "排练资源没有可用并行容量" in (short_plan.tasks[1].unassigned_reason or "")
+    assert "灰色外套" in (short_plan.tasks[1].unassigned_reason or "")
+
+
 def test_line_reading_follows_selected_role_and_source_lines():
     analysis = ScriptAnalysisAgent().run(
         title="对词测试",
@@ -1070,6 +1124,28 @@ def test_resource_agent_explains_ready_maintenance_and_missing_props():
     assert result.ready_count == 1
     assert result.missing_count == 2
     assert "没有匹配记录" in next(item.note for item in result.requirements if item.name == "信封")
+
+
+def test_resource_agent_explains_costume_handoff_to_schedule_agent():
+    analysis = ScriptAnalysisAgent().run(
+        title="服装资源路由",
+        version_label="v1",
+        script_text="第一场\n（林澄穿灰色外套。）\n林澄：开始。",
+        script_id="costume-resource-route",
+        analysis_mode="rules",
+    )
+    result = ResourceAgent().check(analysis, [
+        ResourceInventoryItem(
+            resource_id="costume-route",
+            category="costume",
+            name="灰色外套",
+            quantity=1,
+            status="available",
+        ),
+    ])
+
+    assert any("调度 Agent" in warning for warning in result.warnings)
+    assert not any("尚未从剧本文本自动抽取" in warning for warning in result.warnings)
 
 
 def test_resource_audit_agent_explains_created_updated_and_unchanged_records():
@@ -1717,6 +1793,6 @@ def test_rehearsal_agent_eval_set_is_reproducible_without_provider_keys():
 
     report = evaluate_cases()
 
-    assert report["total"] == 12
+    assert report["total"] == 13
     assert report["failed"] == 0
     assert report["pass_rate"] == 100.0

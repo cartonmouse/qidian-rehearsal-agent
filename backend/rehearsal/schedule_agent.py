@@ -61,6 +61,34 @@ def _costume_capacity_snapshot(inventory: list[ResourceInventoryItem]) -> dict[s
     }
 
 
+def _task_resource_requirements(
+    task: ScheduleTask,
+    resource_context: ScheduleResourceContext | None,
+) -> list[tuple[str, str, str, int]]:
+    costume_capacities = {
+        _normalize_label(name): max(1, capacity)
+        for name, capacity in (resource_context.costume_capacities if resource_context else {}).items()
+    }
+    requirements = [
+        (f"actor:{actor}", "actor", actor, 1)
+        for actor in _unique(task.required_characters)
+    ]
+    requirements.extend(
+        (f"prop:{prop}", "prop", prop, 1)
+        for prop in _unique(task.props)
+    )
+    requirements.extend(
+        (
+            f"costume:{_normalize_label(costume)}",
+            "costume",
+            costume,
+            costume_capacities.get(_normalize_label(costume), 1),
+        )
+        for costume in _unique(task.costumes)
+    )
+    return requirements
+
+
 class RehearsalScheduleAgent:
     """Generate scene tasks and greedy parallel groups from a script analysis.
 
@@ -396,15 +424,19 @@ class RehearsalScheduleAgent:
             actor_slots.sort(key=lambda item: (item[0], item[1]))
 
         busy: dict[str, list[tuple[str, int, int]]] = defaultdict(list)
+        busy_resources: dict[str, list[tuple[str, int, int]]] = defaultdict(list)
         planned: list[ScheduleTask] = []
         tool_calls = list(draft.tool_calls)
         for task in sorted(draft.tasks, key=lambda item: (item.parallel_group, item.scene_number)):
             actors = task.required_characters or sorted(slots_by_actor)
+            resource_requirements = _task_resource_requirements(task, draft.resource_context)
             assignment, reason = self._find_interval(
                 actors=actors,
                 duration=task.estimated_minutes,
                 slots_by_actor=slots_by_actor,
                 busy=busy,
+                resources=resource_requirements,
+                busy_resources=busy_resources,
             )
             if assignment is None:
                 alternatives = self._build_alternatives(
@@ -413,6 +445,8 @@ class RehearsalScheduleAgent:
                     reason=reason,
                     slots_by_actor=slots_by_actor,
                     busy=busy,
+                    resources=resource_requirements,
+                    busy_resources=busy_resources,
                 )
                 conflict_priority = "medium" if any(
                     alternative.kind == "shorten_duration" for alternative in alternatives
@@ -426,6 +460,11 @@ class RehearsalScheduleAgent:
                         "scene_number": task.scene_number,
                         "actors": actors,
                         "duration_minutes": task.estimated_minutes,
+                        "resources": [
+                            {"kind": kind, "name": label, "capacity": capacity}
+                            for _, kind, label, capacity in resource_requirements
+                            if kind != "actor"
+                        ],
                     },
                     result={
                         "status": "unassigned",
@@ -454,6 +493,8 @@ class RehearsalScheduleAgent:
             date, start, end = assignment
             for actor in actors:
                 busy[actor].append((date, start, end))
+            for resource_key, _, _, _ in resource_requirements:
+                busy_resources[resource_key].append((date, start, end))
             planned.append(task.model_copy(update={
                 "scheduled_date": date,
                 "scheduled_start": self._format_minutes(start),
@@ -473,6 +514,11 @@ class RehearsalScheduleAgent:
                     "scene_number": task.scene_number,
                     "actors": actors,
                     "duration_minutes": task.estimated_minutes,
+                    "resources": [
+                        {"kind": kind, "name": label, "capacity": capacity}
+                        for _, kind, label, capacity in resource_requirements
+                        if kind != "actor"
+                    ],
                 },
                 result={
                     "status": "scheduled",
@@ -933,11 +979,17 @@ class RehearsalScheduleAgent:
         duration: int,
         slots_by_actor: dict[str, list[tuple[str, int, int]]],
         busy: dict[str, list[tuple[str, int, int]]],
+        resources: list[tuple[str, str, str, int]] | None = None,
+        busy_resources: dict[str, list[tuple[str, int, int]]] | None = None,
     ) -> tuple[tuple[str, int, int] | None, str]:
+        required_resources = resources or []
+        occupied_resources = busy_resources or {}
         missing = [actor for actor in actors if actor not in slots_by_actor]
         if missing:
             return None, f"缺少演员可用时间：{'、'.join(missing)}"
 
+        resource_blocked = False
+        resource_blocker_labels: list[str] = []
         dates = sorted({date for actor in actors for date, _, _ in slots_by_actor[actor]})
         for date in dates:
             date_slots = {
@@ -954,6 +1006,13 @@ class RehearsalScheduleAgent:
                 for actor in actors
                 for busy_date, _, end in busy[actor]
                 if busy_date == date
+            )
+            boundaries.update(
+                boundary
+                for resource_key, _, _, _ in required_resources
+                for busy_date, start, end in occupied_resources.get(resource_key, [])
+                if busy_date == date
+                for boundary in (start, end)
             )
             for start in sorted(boundaries):
                 valid = True
@@ -974,8 +1033,24 @@ class RehearsalScheduleAgent:
                     for busy_date, busy_start, busy_end in busy[actor]
                 ):
                     continue
+                conflicts = [
+                    f"{label}（库存容量 {capacity}）" if kind == "costume" else f"{label}（容量 {capacity}）"
+                    for resource_key, kind, label, capacity in required_resources
+                    if sum(
+                        not (end <= busy_start or start >= busy_end)
+                        for busy_date, busy_start, busy_end in occupied_resources.get(resource_key, [])
+                        if busy_date == date
+                    ) >= capacity
+                ]
+                if conflicts:
+                    resource_blocked = True
+                    resource_blocker_labels.extend(conflicts)
+                    continue
                 return (date, start, end), ""
 
+        if resource_blocked:
+            labels = "、".join(dict.fromkeys(resource_blocker_labels))
+            return None, f"排练资源没有可用并行容量：{labels}"
         return None, "演员之间没有共同的空闲时间段"
 
     def _build_alternatives(
@@ -986,6 +1061,8 @@ class RehearsalScheduleAgent:
         reason: str,
         slots_by_actor: dict[str, list[tuple[str, int, int]]],
         busy: dict[str, list[tuple[str, int, int]]],
+        resources: list[tuple[str, str, str, int]] | None = None,
+        busy_resources: dict[str, list[tuple[str, int, int]]] | None = None,
     ) -> list[ScheduleAlternative]:
         """Offer deterministic, reviewable next actions instead of returning a dead end."""
         missing = [actor for actor in actors if actor not in slots_by_actor]
@@ -1010,6 +1087,8 @@ class RehearsalScheduleAgent:
                 duration=duration,
                 slots_by_actor=slots_by_actor,
                 busy=busy,
+                resources=resources,
+                busy_resources=busy_resources,
             )
             if assignment is None:
                 continue
