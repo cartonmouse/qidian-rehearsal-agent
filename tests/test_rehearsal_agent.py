@@ -147,6 +147,62 @@ def test_schedule_agent_explains_missing_common_time():
 
     assert planned.tasks[0].status == "unassigned"
     assert planned.tasks[0].unassigned_reason == "演员之间没有共同的空闲时间段"
+    assert planned.tasks[0].conflict_priority == "high"
+    assert planned.tasks[0].alternatives[0].kind == "split_by_actor"
+    assert planned.tool_calls[-2].result["alternatives"]
+
+
+def test_schedule_agent_proposes_shorter_slot_when_full_duration_does_not_fit():
+    analysis = ScriptAnalysisAgent().run(
+        title="短时替代方案",
+        version_label="v1",
+        script_text="第一场\n小林：我们开始。\n导演：好。",
+    )
+    analysis.review_status = "confirmed"
+    draft = RehearsalScheduleAgent().run(analysis, default_minutes=45)
+    planned = RehearsalScheduleAgent().assign(draft, [
+        AvailabilitySlot(actor="小林", date="2026-08-25", start="19:00", end="19:45"),
+        AvailabilitySlot(actor="导演", date="2026-08-25", start="19:30", end="20:30"),
+    ])
+
+    task = planned.tasks[0]
+    assert task.status == "unassigned"
+    assert task.conflict_priority == "medium"
+    shorter = next(item for item in task.alternatives if item.kind == "shorten_duration")
+    assert (shorter.date, shorter.start, shorter.end, shorter.duration_minutes) == (
+        "2026-08-25", "19:30", "19:45", 15,
+    )
+
+
+def test_schedule_agent_keeps_manual_override_distinct_from_availability_match():
+    analysis = ScriptAnalysisAgent().run(
+        title="人工覆盖",
+        version_label="v1",
+        script_text="第一场\n小林：我们开始。\n导演：好。",
+    )
+    analysis.review_status = "confirmed"
+    agent = RehearsalScheduleAgent()
+    draft = agent.run(analysis)
+    planned = agent.assign(draft, [
+        AvailabilitySlot(actor="小林", date="2026-08-25", start="19:00", end="20:00"),
+    ])
+    overridden = agent.apply_manual_override(
+        planned,
+        task_id=planned.tasks[0].task_id,
+        date="2026-08-26",
+        start="19:00",
+        end="20:00",
+        note="导演确认临时到场",
+        agent_run_id="3" * 32,
+        parent_run_id=planned.agent_run_id,
+        root_run_id=planned.root_run_id,
+    )
+
+    task = overridden.tasks[0]
+    assert task.status == "overridden"
+    assert task.manual_override is not None
+    assert task.manual_override.note == "导演确认临时到场"
+    assert overridden.tool_calls[-1].tool_name == "apply_manual_override"
 
 
 def test_availability_slot_rejects_invalid_calendar_and_interval():
@@ -1228,6 +1284,6 @@ def test_rehearsal_agent_eval_set_is_reproducible_without_provider_keys():
 
     report = evaluate_cases()
 
-    assert report["total"] == 7
+    assert report["total"] == 8
     assert report["failed"] == 0
     assert report["pass_rate"] == 100.0

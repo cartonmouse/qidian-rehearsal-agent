@@ -61,6 +61,7 @@ from backend.rehearsal.models import (
     ScriptVersionDiff,
     ScheduleDraft,
     ScheduleDraftRequest,
+    ScheduleOverrideRequest,
     SchedulePlanRequest,
     ScriptAnalysis,
     LineReadingRequest,
@@ -361,7 +362,8 @@ def _elapsed_ms(started: float) -> int:
 
 def _schedule_trace(draft: ScheduleDraft, *, planned: bool) -> list[AgentStep]:
     """Turn scheduling decisions into a compact, human-readable trace."""
-    scheduled = sum(task.status == "scheduled" for task in draft.tasks)
+    scheduled = sum(task.status in {"scheduled", "overridden"} for task in draft.tasks)
+    overridden = sum(task.status == "overridden" for task in draft.tasks)
     unassigned = [task for task in draft.tasks if task.status == "unassigned"]
     trace = [
         AgentStep(
@@ -406,6 +408,13 @@ def _schedule_trace(draft: ScheduleDraft, *, planned: bool) -> list[AgentStep]:
                 output_count=len(unassigned),
             ),
         ])
+        if overridden:
+            trace.append(AgentStep(
+                name="保留人工覆盖",
+                status="completed",
+                summary=f"保留 {overridden} 个导演确认的人工覆盖时段，并明确标记为非档期校验结果。",
+                output_count=overridden,
+            ))
     return trace
 
 
@@ -892,6 +901,58 @@ def plan_schedule(
         root_run_id=planned.root_run_id,
     )
     return planned
+
+
+@router.post("/scripts/{script_id}/schedule/override", response_model=ScheduleDraft)
+def override_schedule(
+    script_id: str,
+    request: ScheduleOverrideRequest,
+    user_id: str = Depends(get_current_user),
+):
+    """Apply an explicit director override while keeping the decision auditable."""
+    try:
+        analysis = get_script(script_id, user_id=user_id)
+        draft = get_schedule(script_id, user_id=user_id)
+    except ValueError:
+        raise HTTPException(400, "无效的剧本或调度 ID")
+    if analysis is None:
+        raise HTTPException(404, "剧本解析结果不存在")
+    if draft is None:
+        raise HTTPException(404, "排练调度草案不存在")
+    started = perf_counter()
+    run_id = uuid4().hex
+    try:
+        updated = RehearsalScheduleAgent().apply_manual_override(
+            draft,
+            task_id=request.task_id,
+            date=request.date,
+            start=request.start,
+            end=request.end,
+            note=request.note,
+            agent_run_id=run_id,
+            parent_run_id=draft.agent_run_id,
+            root_run_id=draft.root_run_id or draft.agent_run_id or run_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    save_schedule(updated, user_id=user_id)
+    overridden = next(task for task in updated.tasks if task.task_id == request.task_id)
+    record_agent_run(
+        user_id=user_id,
+        agent="schedule-plan",
+        action="人工覆盖排班",
+        script_id=analysis.script_id,
+        script_title=analysis.title,
+        mode="导演人工确认",
+        summary=f"第 {overridden.scene_number} 场已由导演确认人工覆盖时段。",
+        trace=_schedule_trace(updated, planned=True),
+        warnings=[overridden.manual_override.note] if overridden.manual_override else [],
+        duration_ms=_elapsed_ms(started),
+        run_id=run_id,
+        parent_run_id=updated.parent_run_id,
+        root_run_id=updated.root_run_id,
+    )
+    return updated
 
 
 @router.post("/scripts/{script_id}/line-reading", response_model=LineReadingResponse)

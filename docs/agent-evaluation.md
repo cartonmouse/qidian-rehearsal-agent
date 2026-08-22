@@ -4,13 +4,14 @@
 
 ## 覆盖范围
 
-当前包含 7 个用例：
+当前包含 8 个用例：
 
 | 用例 | 验证内容 |
 | --- | --- |
 | `script-analysis-basic` | 场次、角色、道具、trace 和原文行号是否完整 |
 | `schedule-feasible` | 已确认剧本能生成任务，并按共享演员资源拆分并行组、连续排班；草案 Run 与排班 Run 保留父子关系 |
-| `schedule-unassigned` | 演员没有共同时间时，任务标记为未排班并给出具体原因 |
+| `schedule-unassigned` | 演员没有共同时间时，任务标记为未排班、给出冲突优先级，并提供分组排练等候选方案 |
+| `schedule-missing-availability` | 缺少演员档期时，任务说明缺失角色，并提供补充档期方案 |
 | `resource-check-scene` | 道具库存的已就绪、维修中、缺失状态和解释是否正确 |
 | `rag-evidence-and-no-hallucination` | RAG 是否返回带原文行号的证据，且回答引用证据 ID |
 | `rag-empty-stops-guessing` | 没有证据时是否明确停止猜测 |

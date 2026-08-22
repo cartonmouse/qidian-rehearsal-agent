@@ -97,6 +97,7 @@ const SCHEDULE_TOOL_LABELS: Record<string, string> = {
   validate_schedule_draft: "校验调度草案",
   find_common_actor_slot: "查找共同档期",
   validate_schedule: "校验排班结果",
+  apply_manual_override: "应用人工覆盖",
 };
 
 const SCHEDULE_TOOL_PHASE_LABELS: Record<ScheduleToolCall["phase"], string> = {
@@ -105,6 +106,7 @@ const SCHEDULE_TOOL_PHASE_LABELS: Record<ScheduleToolCall["phase"], string> = {
   group: "分组",
   assign: "排班",
   validate: "校验",
+  override: "人工覆盖",
 };
 
 function formatScheduleToolResult(call: ScheduleToolCall): string {
@@ -120,6 +122,9 @@ function formatScheduleToolResult(call: ScheduleToolCall): string {
   }
   if (call.tool_name === "validate_schedule") {
     return `已排 ${String(result.scheduled_count || 0)} · 未排 ${String(result.unassigned_count || 0)} · 冲突 ${String(result.overlap_count || 0)}`;
+  }
+  if (call.tool_name === "apply_manual_override") {
+    return `人工确认 · ${String(result.duration_minutes || 0)} 分钟`;
   }
   if (call.tool_name === "extract_scene_requirements") {
     const characters = Array.isArray(result.required_characters) ? result.required_characters.length : 0;
@@ -751,11 +756,20 @@ export default function RehearsalStudio() {
                                 <div className="mt-2 rounded-lg bg-green/8 px-2 py-1.5 text-xs text-green">
                                   已排班：{task.scheduled_date} · {task.scheduled_start}–{task.scheduled_end}
                                 </div>
+                              ) : task.status === "overridden" ? (
+                                <div className="mt-2 rounded-lg bg-primary/8 px-2 py-1.5 text-xs text-primary">
+                                  人工覆盖：{task.scheduled_date} · {task.scheduled_start}–{task.scheduled_end}
+                                </div>
                               ) : task.status === "unassigned" ? (
                                 <div className="mt-2 rounded-lg bg-red/8 px-2 py-1.5 text-xs text-red">
                                   未排班：{task.unassigned_reason}
                                 </div>
                               ) : null}
+                              {task.status === "unassigned" && task.alternatives?.length > 0 && (
+                                <div className="mt-2 rounded-lg border border-orange/20 bg-orange/6 px-2 py-1.5 text-[11px] leading-5 text-orange">
+                                  候选方案：{task.alternatives.map((alternative) => alternative.label).join("；")}
+                                </div>
+                              )}
                               <div className="mt-2 text-xs leading-5 text-dim">
                                 演员：{task.required_characters.length > 0 ? task.required_characters.join("、") : "待确认"}
                               </div>

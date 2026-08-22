@@ -21,6 +21,7 @@ import {
   getAvailability,
   getScheduleDraft,
   getScripts,
+  overrideSchedule,
   planSchedule,
   saveAvailability,
   type AvailabilitySlot,
@@ -45,6 +46,27 @@ const REVIEW_STATUS_LABELS: Record<ScriptSummary["review_status"], string> = {
   pending: "待确认",
   confirmed: "已确认",
   edited: "已修改",
+};
+
+const CONFLICT_PRIORITY_LABELS: Record<ScheduleTask["conflict_priority"], string> = {
+  none: "无冲突",
+  low: "低优先级",
+  medium: "中优先级",
+  high: "高优先级",
+};
+
+const ALTERNATIVE_KIND_LABELS: Record<string, string> = {
+  shorten_duration: "缩短时长",
+  split_by_actor: "分组排练",
+  request_availability: "补充档期",
+};
+
+type ScheduleOverridePayload = {
+  task_id: string;
+  date: string;
+  start: string;
+  end: string;
+  note: string;
 };
 
 export default function ActorSchedule() {
@@ -212,8 +234,24 @@ export default function ActorSchedule() {
     }
   }
 
-  const scheduledCount = schedule?.tasks.filter((task) => task.status === "scheduled").length || 0;
+  const scheduledCount = schedule?.tasks.filter((task) => task.status === "scheduled" || task.status === "overridden").length || 0;
   const unassignedCount = schedule?.tasks.filter((task) => task.status === "unassigned").length || 0;
+
+  async function applyScheduleOverride(payload: ScheduleOverridePayload) {
+    if (!selectedScript) return;
+    setPlanning(true);
+    setError("");
+    setMessage("");
+    try {
+      setSchedule(await overrideSchedule(selectedScript.script_id, payload));
+      setMessage("已保存导演人工覆盖；该时段会保留为人工决定，不伪装成演员档期校验通过。");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "人工覆盖排班失败");
+      throw reason;
+    } finally {
+      setPlanning(false);
+    }
+  }
 
   return (
     <div className={cn(PAGE_CLASS, "space-y-4")}>
@@ -384,6 +422,7 @@ export default function ActorSchedule() {
                 planning={planning}
                 onCreate={() => void createSchedule()}
                 onPlan={() => void autoPlan()}
+                onOverride={applyScheduleOverride}
               />
             )}
           </CardContent>
@@ -474,6 +513,7 @@ function ScheduleOverview({
   planning,
   onCreate,
   onPlan,
+  onOverride,
 }: {
   schedule: ScheduleDraft;
   selectedScript: ScriptSummary;
@@ -482,6 +522,7 @@ function ScheduleOverview({
   planning: boolean;
   onCreate: () => void;
   onPlan: () => void;
+  onOverride: (payload: ScheduleOverridePayload) => Promise<void>;
 }) {
   const parallelCount = new Set(schedule.tasks.map((task) => task.parallel_group)).size;
   return (
@@ -525,7 +566,7 @@ function ScheduleOverview({
       </div>
 
       <div className="grid gap-3 md:grid-cols-2">
-        {schedule.tasks.map((task) => <TaskCard key={task.task_id} task={task} />)}
+        {schedule.tasks.map((task) => <TaskCard key={task.task_id} task={task} onOverride={onOverride} />)}
       </div>
 
       <div className="rounded-xl border border-border bg-background/35 px-3 py-2.5 text-xs leading-5 text-dim">
@@ -535,7 +576,35 @@ function ScheduleOverview({
   );
 }
 
-function TaskCard({ task }: { task: ScheduleTask }) {
+function TaskCard({ task, onOverride }: { task: ScheduleTask; onOverride: (payload: ScheduleOverridePayload) => Promise<void> }) {
+  const [editing, setEditing] = useState(false);
+  const [date, setDate] = useState(task.scheduled_date || "");
+  const [start, setStart] = useState(task.scheduled_start || "");
+  const [end, setEnd] = useState(task.scheduled_end || "");
+  const [note, setNote] = useState(task.manual_override?.note || "");
+  const [saving, setSaving] = useState(false);
+
+  function beginOverride() {
+    setDate(task.scheduled_date || "");
+    setStart(task.scheduled_start || "");
+    setEnd(task.scheduled_end || "");
+    setNote(task.manual_override?.note || "");
+    setEditing(true);
+  }
+
+  async function submitOverride() {
+    if (!date || !start || !end) return;
+    setSaving(true);
+    try {
+      await onOverride({ task_id: task.task_id, date, start, end, note });
+      setEditing(false);
+    } catch {
+      // The parent renders the server error and keeps this form open for correction.
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="rounded-xl border border-border bg-background/45 p-3">
       <div className="flex items-start justify-between gap-2">
@@ -549,6 +618,11 @@ function TaskCard({ task }: { task: ScheduleTask }) {
       {task.status === "scheduled" ? (
         <div className="mt-2 rounded-lg bg-green/8 px-2 py-1.5 text-xs text-green">
           已排班：{task.scheduled_date} {task.scheduled_start} 至 {task.scheduled_end}
+        </div>
+      ) : task.status === "overridden" ? (
+        <div className="mt-2 rounded-lg bg-primary/8 px-2 py-1.5 text-xs leading-5 text-primary">
+          人工覆盖：{task.scheduled_date} {task.scheduled_start} 至 {task.scheduled_end}
+          <div className="text-[11px] text-primary/75">{task.manual_override?.note || "导演已确认该时段"}</div>
         </div>
       ) : task.status === "unassigned" ? (
         <div className="mt-2 rounded-lg bg-red/8 px-2 py-1.5 text-xs leading-5 text-red">
@@ -567,6 +641,50 @@ function TaskCard({ task }: { task: ScheduleTask }) {
         <Package size={13} className="mt-1 shrink-0 text-orange" />
         <span>{task.props.length > 0 ? task.props.join("、") : "无道具"}</span>
       </div>
+      {task.status === "unassigned" && task.alternatives.length > 0 && (
+        <div className="mt-3 rounded-lg border border-orange/20 bg-orange/6 p-2.5">
+          <div className="flex items-center justify-between gap-2 text-[11px] font-semibold text-orange">
+            <span>候选替代方案</span>
+            <span>{CONFLICT_PRIORITY_LABELS[task.conflict_priority]}</span>
+          </div>
+          <div className="mt-2 space-y-2">
+            {task.alternatives.map((alternative) => (
+              <div key={alternative.alternative_id} className="rounded-md bg-background/35 px-2 py-1.5 text-[11px] leading-5 text-dim">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="font-medium text-text">{alternative.label}</span>
+                  <span className="rounded-full bg-orange/10 px-1.5 py-0.5 text-[10px] text-orange">{ALTERNATIVE_KIND_LABELS[alternative.kind] || alternative.kind}</span>
+                  {alternative.date && <span className="font-mono text-[10px] text-teal">{alternative.date} {alternative.start}–{alternative.end}</span>}
+                </div>
+                <div>{alternative.reason}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="mt-3 flex justify-end">
+        <Button type="button" variant="outline" size="sm" onClick={beginOverride} disabled={saving}>
+          {task.status === "overridden" ? "修改人工覆盖" : "人工覆盖排班"}
+        </Button>
+      </div>
+      {editing && (
+        <div className="mt-3 rounded-lg border border-primary/20 bg-primary/5 p-2.5">
+          <div className="text-[11px] font-medium text-text">导演确认覆盖时段</div>
+          <div className="mt-2 grid gap-2 sm:grid-cols-3">
+            <label className="text-[10px] text-dim">日期<input type="date" value={date} onChange={(event) => setDate(event.target.value)} className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-text" /></label>
+            <label className="text-[10px] text-dim">开始<input type="time" value={start} onChange={(event) => setStart(event.target.value)} className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-text" /></label>
+            <label className="text-[10px] text-dim">结束<input type="time" value={end} onChange={(event) => setEnd(event.target.value)} className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-text" /></label>
+          </div>
+          <input value={note} onChange={(event) => setNote(event.target.value)} placeholder="覆盖原因（可选）" className="mt-2 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-text placeholder:text-dim" />
+          <div className="mt-2 flex justify-end gap-2">
+            <Button type="button" variant="ghost" size="sm" onClick={() => setEditing(false)} disabled={saving}>取消</Button>
+            <Button type="button" size="sm" onClick={() => void submitOverride()} disabled={saving || !date || !start || !end}>
+              {saving ? <Loader2 className="animate-spin" /> : <Save size={13} />}
+              保存覆盖
+            </Button>
+          </div>
+          <div className="mt-1 text-[10px] leading-4 text-dim">覆盖时长不能少于预计 {task.estimated_minutes} 分钟；保存后会在 Agent 运行记录中留下人工决策。</div>
+        </div>
+      )}
     </div>
   );
 }

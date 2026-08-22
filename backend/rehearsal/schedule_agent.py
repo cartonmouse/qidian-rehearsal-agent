@@ -5,7 +5,15 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from backend.rehearsal.models import AvailabilitySlot, ScheduleDraft, ScheduleTask, ScheduleToolCall, ScriptAnalysis
+from backend.rehearsal.models import (
+    AvailabilitySlot,
+    ScheduleAlternative,
+    ScheduleDraft,
+    ScheduleManualOverride,
+    ScheduleTask,
+    ScheduleToolCall,
+    ScriptAnalysis,
+)
 
 
 def _unique(values: list[str]) -> list[str]:
@@ -189,6 +197,16 @@ class RehearsalScheduleAgent:
                 busy=busy,
             )
             if assignment is None:
+                alternatives = self._build_alternatives(
+                    task=task,
+                    actors=actors,
+                    reason=reason,
+                    slots_by_actor=slots_by_actor,
+                    busy=busy,
+                )
+                conflict_priority = "medium" if any(
+                    alternative.kind == "shorten_duration" for alternative in alternatives
+                ) else "high"
                 self._record_tool_call(
                     tool_calls,
                     tool_name="find_common_actor_slot",
@@ -199,15 +217,26 @@ class RehearsalScheduleAgent:
                         "actors": actors,
                         "duration_minutes": task.estimated_minutes,
                     },
-                    result={"status": "unassigned", "reason": reason},
+                    result={
+                        "status": "unassigned",
+                        "reason": reason,
+                        "conflict_priority": conflict_priority,
+                        "alternatives": [alternative.model_dump(mode="json") for alternative in alternatives],
+                    },
                     status="repaired",
-                    summary=f"第 {task.scene_number} 场未找到共同档期：{reason}。",
+                    summary=(
+                        f"第 {task.scene_number} 场未找到共同档期：{reason}；"
+                        f"提供 {len(alternatives)} 个候选方案。"
+                    ),
                 )
                 planned.append(task.model_copy(update={
                     "scheduled_date": None,
                     "scheduled_start": None,
                     "scheduled_end": None,
                     "unassigned_reason": reason,
+                    "conflict_priority": conflict_priority,
+                    "alternatives": alternatives,
+                    "manual_override": None,
                     "status": "unassigned",
                 }))
                 continue
@@ -220,6 +249,9 @@ class RehearsalScheduleAgent:
                 "scheduled_start": self._format_minutes(start),
                 "scheduled_end": self._format_minutes(end),
                 "unassigned_reason": None,
+                "conflict_priority": "none",
+                "alternatives": [],
+                "manual_override": None,
                 "status": "scheduled",
             }))
             self._record_tool_call(
@@ -269,6 +301,74 @@ class RehearsalScheduleAgent:
             "parent_run_id": resolved_parent_run_id,
             "root_run_id": resolved_root_run_id,
             "tasks": planned,
+            "tool_calls": tool_calls,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+    def apply_manual_override(
+        self,
+        draft: ScheduleDraft,
+        *,
+        task_id: str,
+        date: str,
+        start: str,
+        end: str,
+        note: str = "",
+        agent_run_id: str | None = None,
+        parent_run_id: str | None = None,
+        root_run_id: str | None = None,
+    ) -> ScheduleDraft:
+        """Persist a director-approved slot without pretending it passed availability checks."""
+        start_minutes = self._to_minutes(start)
+        end_minutes = self._to_minutes(end)
+        if end_minutes <= start_minutes:
+            raise ValueError("人工覆盖的结束时间必须晚于开始时间")
+        task = next((item for item in draft.tasks if item.task_id == task_id), None)
+        if task is None:
+            raise ValueError("找不到要覆盖的排练任务")
+        duration = end_minutes - start_minutes
+        if duration < task.estimated_minutes:
+            raise ValueError(f"人工覆盖时长不能少于预计时长 {task.estimated_minutes} 分钟")
+
+        override = ScheduleManualOverride(
+            date=date,
+            start=start,
+            end=end,
+            note=note.strip() or "导演确认后人工覆盖排班",
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+        updated_tasks = [item.model_copy(update={
+            "scheduled_date": date,
+            "scheduled_start": start,
+            "scheduled_end": end,
+            "unassigned_reason": None,
+            "conflict_priority": "none",
+            "alternatives": [],
+            "manual_override": override,
+            "status": "overridden",
+        }) if item.task_id == task_id else item for item in draft.tasks]
+        resolved_parent_run_id = parent_run_id if parent_run_id is not None else draft.agent_run_id
+        resolved_root_run_id = root_run_id or draft.root_run_id or draft.agent_run_id or agent_run_id
+        tool_calls = list(draft.tool_calls)
+        self._record_tool_call(
+            tool_calls,
+            tool_name="apply_manual_override",
+            phase="override",
+            arguments={
+                "task_id": task_id,
+                "date": date,
+                "start": start,
+                "end": end,
+                "note": override.note,
+            },
+            result={"status": "overridden", "duration_minutes": duration},
+            summary=f"导演确认人工覆盖第 {task.scene_number} 场排班，不视为演员档期校验通过。",
+        )
+        return draft.model_copy(update={
+            "agent_run_id": agent_run_id or draft.agent_run_id,
+            "parent_run_id": resolved_parent_run_id,
+            "root_run_id": resolved_root_run_id,
+            "tasks": updated_tasks,
             "tool_calls": tool_calls,
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
@@ -359,3 +459,73 @@ class RehearsalScheduleAgent:
                 return (date, start, end), ""
 
         return None, "演员之间没有共同的空闲时间段"
+
+    def _build_alternatives(
+        self,
+        *,
+        task: ScheduleTask,
+        actors: list[str],
+        reason: str,
+        slots_by_actor: dict[str, list[tuple[str, int, int]]],
+        busy: dict[str, list[tuple[str, int, int]]],
+    ) -> list[ScheduleAlternative]:
+        """Offer deterministic, reviewable next actions instead of returning a dead end."""
+        missing = [actor for actor in actors if actor not in slots_by_actor]
+        alternatives: list[ScheduleAlternative] = []
+        if missing:
+            alternatives.append(ScheduleAlternative(
+                alternative_id=f"{task.task_id}-alt-1",
+                kind="request_availability",
+                label="补齐缺失演员档期",
+                reason=f"当前没有这些演员的可用时间：{'、'.join(missing)}。",
+                affected_actors=missing,
+                priority="high",
+            ))
+            return alternatives
+
+        candidates = list(range(task.estimated_minutes - 15, 14, -15))
+        if task.estimated_minutes > 15 and 15 not in candidates:
+            candidates.append(15)
+        for duration in candidates:
+            assignment, _ = self._find_interval(
+                actors=actors,
+                duration=duration,
+                slots_by_actor=slots_by_actor,
+                busy=busy,
+            )
+            if assignment is None:
+                continue
+            date, start, end = assignment
+            alternatives.append(ScheduleAlternative(
+                alternative_id=f"{task.task_id}-alt-{len(alternatives) + 1}",
+                kind="shorten_duration",
+                label=f"压缩为 {duration} 分钟",
+                reason="完整排练时长没有共同区间，但所有演员存在较短的共同空闲时间。",
+                affected_actors=actors,
+                date=date,
+                start=self._format_minutes(start),
+                end=self._format_minutes(end),
+                duration_minutes=duration,
+                priority="medium",
+            ))
+            break
+
+        if len(actors) > 1:
+            alternatives.append(ScheduleAlternative(
+                alternative_id=f"{task.task_id}-alt-{len(alternatives) + 1}",
+                kind="split_by_actor",
+                label="拆分为分组排练",
+                reason=f"完整合排需要 {'、'.join(actors)} 同时到场，可先按角色分组完成对词或走位。",
+                affected_actors=actors,
+                priority="high",
+            ))
+        else:
+            alternatives.append(ScheduleAlternative(
+                alternative_id=f"{task.task_id}-alt-{len(alternatives) + 1}",
+                kind="request_availability",
+                label="增加或延长演员档期",
+                reason=reason,
+                affected_actors=actors,
+                priority="high",
+            ))
+        return alternatives

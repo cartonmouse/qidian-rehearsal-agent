@@ -55,6 +55,8 @@
 
 每个任务还会记录 `parallel_reason`：没有共同资源时说明“与已有任务没有共同演员或道具资源”，发生冲突时列出共享的演员或道具，便于导演理解为什么两个场次不能并行。
 
+当完整排练没有共同档期时，排班 Agent 不直接结束流程，而是为任务返回 `conflict_priority` 和 `alternatives`：如果存在较短共同区间，建议压缩时长；多演员冲突时建议分组排练；缺少演员档期时明确要求补齐对应角色。导演可以调用 `POST /api/rehearsal/scripts/{script_id}/schedule/override` 提交人工确认的日期和时段，任务会标记为 `overridden`，并通过工具调用和 Agent 运行记录说明它没有经过自动档期校验。
+
 ### 对词 Agent MVP
 
 `POST /api/rehearsal/scripts/{script_id}/line-reading` 推进一轮角色对词。请求包含场次、练习角色、模式、当前台词索引和演员本轮输入：
@@ -256,6 +258,7 @@ Suggestion Agent 的第一版只做可解释判断：分类为 `safety`，或内
 - `GET/PUT /api/rehearsal/availability`
 - `POST /api/rehearsal/scripts/{script_id}/schedule/draft`
 - `POST /api/rehearsal/scripts/{script_id}/schedule/plan`
+- `POST /api/rehearsal/scripts/{script_id}/schedule/override`
 - `POST /api/rehearsal/scripts/{script_id}/line-reading`
 - `POST /api/rehearsal/scripts/{script_id}/rag`
 - `GET /api/rehearsal/agent-runs?limit=50`

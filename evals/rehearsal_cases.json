@@ -72,7 +72,30 @@
       "task_count": 2,
       "scheduled_count": 0,
       "unassigned_count": 2,
-      "unassigned_reason_contains": "没有共同"
+      "unassigned_reason_contains": "没有共同",
+      "conflict_priority": "high",
+      "alternative_kinds": ["split_by_actor"]
+    }
+  },
+  {
+    "id": "schedule-missing-availability",
+    "kind": "schedule",
+    "title": "缺少演员档期",
+    "version_label": "eval-v1",
+    "script_text": "第一场\n小林：我们开始。\n导演：好。",
+    "analysis_mode": "rules",
+    "review_status": "confirmed",
+    "default_minutes": 45,
+    "slots": [
+      {"actor": "小林", "date": "2026-08-25", "start": "19:00", "end": "21:00"}
+    ],
+    "expected": {
+      "task_count": 1,
+      "scheduled_count": 0,
+      "unassigned_count": 1,
+      "unassigned_reason_contains": "缺少演员可用时间",
+      "conflict_priority": "high",
+      "alternative_kinds": ["request_availability"]
     }
   },
   {

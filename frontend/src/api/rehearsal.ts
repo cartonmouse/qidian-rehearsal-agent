@@ -283,17 +283,42 @@ export interface ScheduleTask {
   estimated_minutes: number;
   parallel_group: number;
   parallel_reason: string;
+  conflict_priority: "none" | "low" | "medium" | "high";
+  alternatives: ScheduleAlternative[];
+  manual_override: ScheduleManualOverride | null;
   scheduled_date: string | null;
   scheduled_start: string | null;
   scheduled_end: string | null;
   unassigned_reason: string | null;
-  status: "draft" | "scheduled" | "unassigned";
+  status: "draft" | "scheduled" | "unassigned" | "overridden";
+}
+
+export interface ScheduleAlternative {
+  alternative_id: string;
+  kind: "shorten_duration" | "split_by_actor" | "request_availability";
+  label: string;
+  reason: string;
+  affected_actors: string[];
+  date: string | null;
+  start: string | null;
+  end: string | null;
+  duration_minutes: number | null;
+  priority: "low" | "medium" | "high";
+  requires_human_approval: boolean;
+}
+
+export interface ScheduleManualOverride {
+  date: string;
+  start: string;
+  end: string;
+  note: string;
+  created_at: string;
 }
 
 export interface ScheduleToolCall {
   call_id: string;
   tool_name: string;
-  phase: "inspect" | "extract" | "group" | "assign" | "validate";
+  phase: "inspect" | "extract" | "group" | "assign" | "validate" | "override";
   arguments: Record<string, unknown>;
   result: Record<string, unknown>;
   status: "completed" | "repaired" | "failed";
@@ -751,6 +776,19 @@ export async function planSchedule(
     body: JSON.stringify({ slots }),
   });
   await ensureOk(response);
+  return response.json();
+}
+
+export async function overrideSchedule(
+  scriptId: string,
+  payload: { task_id: string; date: string; start: string; end: string; note?: string },
+): Promise<ScheduleDraft> {
+  const response = await authFetch(`/api/rehearsal/scripts/${encodeURIComponent(scriptId)}/schedule/override`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  await ensureOk(response, "人工覆盖排班失败");
   return response.json();
 }
 

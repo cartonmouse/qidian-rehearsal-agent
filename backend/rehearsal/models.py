@@ -182,6 +182,37 @@ class SchedulePlanRequest(BaseModel):
     slots: list[AvailabilitySlot] = Field(min_length=1, max_length=500)
 
 
+class ScheduleOverrideRequest(BaseModel):
+    task_id: str = Field(min_length=1, max_length=100)
+    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    start: str = Field(pattern=r"^\d{2}:\d{2}$")
+    end: str = Field(pattern=r"^\d{2}:\d{2}$")
+    note: str = Field(default="", max_length=500)
+
+    @field_validator("date")
+    @classmethod
+    def validate_date(cls, value: str) -> str:
+        try:
+            datetime.strptime(value, "%Y-%m-%d")
+        except ValueError as exc:
+            raise ValueError("日期必须是有效的 YYYY-MM-DD") from exc
+        return value
+
+    @field_validator("start", "end")
+    @classmethod
+    def validate_time(cls, value: str) -> str:
+        hour, minute = (int(part) for part in value.split(":", 1))
+        if hour > 23 or minute > 59:
+            raise ValueError("时间必须是有效的 HH:MM")
+        return value
+
+    @model_validator(mode="after")
+    def validate_interval(self):
+        if self.start >= self.end:
+            raise ValueError("结束时间必须晚于开始时间")
+        return self
+
+
 class AvailabilityUpdateRequest(BaseModel):
     """User-level actor availability that can be maintained before a script exists."""
 
@@ -998,11 +1029,35 @@ class ScheduleToolCall(BaseModel):
 
     call_id: str
     tool_name: str
-    phase: Literal["inspect", "extract", "group", "assign", "validate"]
+    phase: Literal["inspect", "extract", "group", "assign", "validate", "override"]
     arguments: dict[str, Any] = Field(default_factory=dict)
     result: dict[str, Any] = Field(default_factory=dict)
     status: Literal["completed", "repaired", "failed"] = "completed"
     summary: str
+
+
+class ScheduleAlternative(BaseModel):
+    """A reviewable fallback proposal for a task that cannot be fully scheduled."""
+
+    alternative_id: str
+    kind: Literal["shorten_duration", "split_by_actor", "request_availability"]
+    label: str
+    reason: str
+    affected_actors: list[str] = Field(default_factory=list)
+    date: str | None = None
+    start: str | None = None
+    end: str | None = None
+    duration_minutes: int | None = Field(default=None, ge=15, le=240)
+    priority: Literal["low", "medium", "high"] = "medium"
+    requires_human_approval: bool = True
+
+
+class ScheduleManualOverride(BaseModel):
+    date: str
+    start: str
+    end: str
+    note: str = ""
+    created_at: str
 
 
 class ScheduleTask(BaseModel):
@@ -1015,11 +1070,14 @@ class ScheduleTask(BaseModel):
     estimated_minutes: int = Field(ge=15, le=240)
     parallel_group: int = Field(ge=1)
     parallel_reason: str = ""
+    conflict_priority: Literal["none", "low", "medium", "high"] = "none"
+    alternatives: list[ScheduleAlternative] = Field(default_factory=list)
+    manual_override: ScheduleManualOverride | None = None
     scheduled_date: str | None = None
     scheduled_start: str | None = None
     scheduled_end: str | None = None
     unassigned_reason: str | None = None
-    status: Literal["draft", "scheduled", "unassigned"] = "draft"
+    status: Literal["draft", "scheduled", "unassigned", "overridden"] = "draft"
 
 
 class ScheduleDraft(BaseModel):

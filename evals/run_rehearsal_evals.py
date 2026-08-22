@@ -160,6 +160,12 @@ def _evaluate_schedule(case: dict[str, Any], checks: list[CheckResult]) -> None:
         reasons = [task.unassigned_reason or "" for task in planned.tasks if task.status == "unassigned"]
         found = any(expected["unassigned_reason_contains"] in reason for reason in reasons)
         _check(checks, "unassigned_reason_contains", found, True, passed=found)
+    if expected.get("conflict_priority"):
+        priorities = sorted({task.conflict_priority for task in planned.tasks if task.status == "unassigned"})
+        _check(checks, "conflict_priority", priorities, [expected["conflict_priority"]])
+    if expected.get("alternative_kinds"):
+        kinds = sorted({alternative.kind for task in planned.tasks for alternative in task.alternatives})
+        _check(checks, "alternative_kinds", kinds, sorted(expected["alternative_kinds"]))
     if linkage:
         _check(checks, "draft_run_id", draft.agent_run_id, draft_run_id)
         _check(checks, "plan_run_id", planned.agent_run_id, plan_run_id)

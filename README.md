@@ -62,7 +62,7 @@
 
 Agent 运行记录已经接入侧栏“Agent运行记录”：剧本解析、调度草案、自动排班、对词、资源检查和剧本问答都会保存结构化摘要、运行模式、步骤 trace、耗时和降级原因；调度草案与自动排班还会通过 `parent_run_id` / `root_run_id` 组成可回看的运行链。页面额外聚合最近 30 天的失败率、降级率、按 Agent 统计和 failed step。LLM 调用只对连接超时、限流和 5xx 等可重试错误最多尝试 2 次，业务写入不自动重试。
 
-Agent 评估集已经接入仓库：`evals/rehearsal_cases.json` 覆盖剧本解析、可行排班、调度工具调用链与父子 Run 关联、未排班原因、资源状态、带证据/拒答的 RAG 路径和对词会话恢复；`python -m evals.run_rehearsal_evals` 可以在没有模型服务的情况下输出逐项 JSON 报告，后端回归测试和 CI 会执行同一套评估。
+Agent 评估集已经接入仓库：`evals/rehearsal_cases.json` 覆盖剧本解析、可行排班、调度工具调用链与父子 Run 关联、未排班原因与替代方案、资源状态、带证据/拒答的 RAG 路径和对词会话恢复；`python -m evals.run_rehearsal_evals` 可以在没有模型服务的情况下输出逐项 JSON 报告，后端回归测试和 CI 会执行同一套评估。
 
 演员可用时间现在作为独立的“演员时间池”保存，不要求先解析剧本；排班 Agent 在生成任务后读取这组可复用档期。工作台仍提供“预览调度（未确认）”入口，方便先观察结果，再决定是否进行人工确认。
 
@@ -71,7 +71,7 @@ Agent 评估集已经接入仓库：`evals/rehearsal_cases.json` 覆盖剧本解
 ## Agent 能力路线
 
 - 已完成：剧本解析、人工确认、版本追踪与带证据回指的 RAG 问答
-- 已完成：排练调度、并行任务分组、演员时间池和自动排班
+- 已完成：排练调度、并行任务分组、演员时间池、自动排班、冲突优先级和候选替代方案
 - 已完成：对词 Agent MVP、舞台可视化、资源检查、场记、复盘和建议收件箱
 - 已完成：格言表与宣传文案 Agent，支持规则/LLM/降级路径
 - 已完成：反馈度量面板，统计窗口、趋势、高频问题和 Agent 路径均可回溯
@@ -85,6 +85,7 @@ Agent 评估集已经接入仓库：`evals/rehearsal_cases.json` 覆盖剧本解
 - 已完成：调度 Agent 工具调用序列、参数/结果展示，以及对词 Agent 的持久化会话游标和 transcript
 - 已完成：评估集覆盖调度工具调用链与对词会话恢复边界
 - 已完成：调度草案与自动排班共享根 Run，并在 Agent运行记录页展示关联运行链
+- 已完成：无共同档期时的分组/缩短/补档建议，以及导演人工覆盖排班
 - 待继续：补充更多真实剧本样本和 LLM mock 合同评估
 
 ## 技术栈
@@ -132,6 +133,7 @@ Agent 评估集说明和面试讲解要点位于 [`docs/agent-evaluation.md`](do
 - `POST /api/rehearsal/scripts/{script_id}/schedule/draft`：生成排练调度草案；请求体可传 `{"default_minutes": 45, "preview": true}` 生成未确认预览
 - `GET /api/rehearsal/scripts/{script_id}/schedule`：读取最近一次调度草案
 - `POST /api/rehearsal/scripts/{script_id}/schedule/plan`：根据演员可用时间生成自动排班结果
+- `POST /api/rehearsal/scripts/{script_id}/schedule/override`：保存导演确认的人工覆盖时段，并保留审计轨迹
 - `POST /api/rehearsal/scripts/{script_id}/line-reading`：推进一轮角色对词；支持 `strict` 和 `adaptive` 模式
 - `GET /api/rehearsal/scripts/{script_id}/line-reading/sessions/{session_id}`：恢复当前用户的对词游标、transcript 和下一句原词
 - `POST /api/rehearsal/scripts/{script_id}/rag`：在当前剧本版本内检索证据并回答问题；支持 `rules`/`semantic` 检索和 `auto`/`rules`/`llm` 回答
