@@ -151,6 +151,7 @@
         "invoice_count": 1,
         "costume_count": 1,
         "costume_requirement_count": 1,
+        "costume_capacities": {"灰色外套": 1},
         "unmatched_costume_requirement_count": 0,
         "estimated_total": 100.0,
         "actual_total": 120.0,
@@ -163,7 +164,7 @@
         "warning_count": 4
       },
       "tool_result_keys_by_name": {
-        "inspect_rehearsal_resources": ["music_cue_count", "budget_item_count", "invoice_count", "costume_inventory_count", "costume_issue_count", "costume_requirement_count", "unmatched_costume_requirement_count", "budget_variance", "invoice_total", "verified_invoice_total", "unlinked_invoice_count", "warning_count"]
+        "inspect_rehearsal_resources": ["music_cue_count", "budget_item_count", "invoice_count", "costume_inventory_count", "costume_issue_count", "costume_capacities", "costume_requirement_count", "unmatched_costume_requirement_count", "budget_variance", "invoice_total", "verified_invoice_total", "unlinked_invoice_count", "warning_count"]
       },
       "parallel_groups": [1, 2],
       "first_task_end_equals_second_start": true,
@@ -176,6 +177,48 @@
         "count": 2,
         "room_tool": true,
         "repeat_error_contains": "批量重复提交被拒绝"
+      }
+    }
+  },
+  {
+    "id": "schedule-costume-capacity",
+    "kind": "schedule",
+    "title": "服装容量",
+    "version_label": "eval-v1",
+    "analysis_mode": "rules",
+    "review_status": "confirmed",
+    "default_minutes": 45,
+    "script_text": "第一场\n（林澄穿灰色外套。）\n林澄：开始。\n第二场\n（顾言穿灰色外套。）\n顾言：开始。",
+    "slots": [
+      {"actor": "林澄", "date": "2026-08-25", "start": "19:00", "end": "21:00"},
+      {"actor": "顾言", "date": "2026-08-25", "start": "19:00", "end": "21:00"}
+    ],
+    "inventory": [
+      {"resource_id": "costume-double", "category": "costume", "name": "灰色外套", "quantity": 2, "status": "available", "location": "服装柜"}
+    ],
+    "expected": {
+      "task_count": 2,
+      "scheduled_count": 2,
+      "unassigned_count": 0,
+      "parallel_groups": [1, 1],
+      "resource_context": {
+        "music_count": 0,
+        "budget_count": 0,
+        "invoice_count": 0,
+        "costume_count": 1,
+        "costume_requirement_count": 1,
+        "costume_capacities": {"灰色外套": 2},
+        "unmatched_costume_requirement_count": 0,
+        "estimated_total": 0.0,
+        "actual_total": 0.0,
+        "invoice_total": 0.0,
+        "verified_invoice_total": 0.0,
+        "unlinked_invoice_count": 0,
+        "costume_issue_count": 0,
+        "warning_count": 0
+      },
+      "tool_result_keys_by_name": {
+        "inspect_rehearsal_resources": ["costume_capacities", "costume_requirement_count", "unmatched_costume_requirement_count"]
       }
     }
   },

@@ -1124,6 +1124,7 @@ class ScheduleResourceContext(BaseModel):
     budget_items: list[BudgetLineItem] = Field(default_factory=list)
     invoices: list[InvoiceRecord] = Field(default_factory=list)
     costume_inventory: list[ResourceInventoryItem] = Field(default_factory=list)
+    costume_capacities: dict[str, int] = Field(default_factory=dict)
     costume_requirements: list[CostumeRequirement] = Field(default_factory=list)
     estimated_total: float = Field(default=0, ge=0)
     actual_total: float = Field(default=0, ge=0)

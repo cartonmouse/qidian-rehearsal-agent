@@ -355,6 +355,7 @@ export interface ScheduleResourceContext {
   budget_items: BudgetLineItem[];
   invoices: InvoiceRecord[];
   costume_inventory: ResourceInventoryItem[];
+  costume_capacities: Record<string, number>;
   costume_requirements: CostumeRequirement[];
   estimated_total: number;
   actual_total: number;

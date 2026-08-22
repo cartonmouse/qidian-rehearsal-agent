@@ -39,6 +39,28 @@ def _normalize_label(value: str) -> str:
     return "".join(value.strip().casefold().split())
 
 
+def _costume_capacity_snapshot(inventory: list[ResourceInventoryItem]) -> dict[str, int]:
+    """Sum usable costume quantities while keeping unavailable records conservative."""
+    display_names: dict[str, str] = {}
+    quantities: defaultdict[str, int] = defaultdict(int)
+    known: list[str] = []
+    for item in inventory:
+        if item.category != "costume":
+            continue
+        key = _normalize_label(item.name)
+        if not key:
+            continue
+        if key not in display_names:
+            display_names[key] = item.name
+            known.append(key)
+        if item.status == "available" and item.quantity > 0:
+            quantities[key] += item.quantity
+    return {
+        display_names[key]: max(1, quantities.get(key, 0))
+        for key in known
+    }
+
+
 class RehearsalScheduleAgent:
     """Generate scene tasks and greedy parallel groups from a script analysis.
 
@@ -65,6 +87,7 @@ class RehearsalScheduleAgent:
             raise ValueError("剧本尚未完成人工确认，不能生成排练调度")
 
         groups: list[set[str]] = []
+        costume_usage: list[dict[str, int]] = []
         tasks: list[ScheduleTask] = []
         tool_calls: list[ScheduleToolCall] = []
         resource_context = self._build_resource_context(
@@ -74,6 +97,10 @@ class RehearsalScheduleAgent:
             inventory,
             analysis.costumes,
         )
+        costume_capacities = {
+            _normalize_label(name): capacity
+            for name, capacity in (resource_context.costume_capacities if resource_context else {}).items()
+        }
         self._record_tool_call(
             tool_calls,
             tool_name="inspect_script",
@@ -100,30 +127,65 @@ class RehearsalScheduleAgent:
                 *(f"prop:{name}" for name in props),
                 *(f"costume:{name}" for name in costumes),
             }
-            conflicting_groups = [
-                index
-                for index, occupied in enumerate(groups, start=1)
-                if resources & occupied
-            ]
+            group_conflicts: dict[int, list[str]] = {}
+            for index, occupied in enumerate(groups, start=1):
+                shared_resources = {
+                    resource
+                    for resource in resources & occupied
+                    if not resource.startswith("costume:")
+                }
+                capacity_conflicts: list[str] = []
+                for costume in costumes:
+                    costume_key = _normalize_label(costume)
+                    capacity = costume_capacities.get(costume_key, 1)
+                    if costume_usage[index - 1].get(costume_key, 0) + 1 > capacity:
+                        capacity_conflicts.append(f"{costume}（库存容量 {capacity}）")
+                if shared_resources or capacity_conflicts:
+                    group_conflicts[index] = [
+                        *(f"共享资源:{resource.split(':', 1)[1]}" for resource in sorted(shared_resources)),
+                        *(f"容量限制:{item}" for item in capacity_conflicts),
+                    ]
+            conflicting_groups = list(group_conflicts)
             group_index = next(
-                (index for index, occupied in enumerate(groups, start=1) if not resources & occupied),
+                (index for index in range(1, len(groups) + 1) if index not in group_conflicts),
                 len(groups) + 1,
             )
             if group_index > len(groups):
                 groups.append(set())
+                costume_usage.append({})
             groups[group_index - 1].update(resources)
+            for costume in costumes:
+                costume_key = _normalize_label(costume)
+                costume_usage[group_index - 1][costume_key] = (
+                    costume_usage[group_index - 1].get(costume_key, 0) + 1
+                )
 
             if not conflicting_groups:
-                parallel_reason = "与已有任务没有共同演员或道具资源"
+                parallel_reason = "与已有任务没有超出演员、道具或服装库存容量"
             else:
-                conflict_resources = sorted({
-                    resource.split(":", 1)[1]
-                    for occupied in (groups[index - 1] for index in conflicting_groups)
-                    for resource in resources & occupied
-                })
+                conflict_details = [
+                    detail
+                    for index in conflicting_groups
+                    for detail in group_conflicts[index]
+                ]
+                shared_details = [
+                    detail.removeprefix("共享资源:")
+                    for detail in conflict_details
+                    if detail.startswith("共享资源:")
+                ]
+                capacity_details = [
+                    detail.removeprefix("容量限制:")
+                    for detail in conflict_details
+                    if detail.startswith("容量限制:")
+                ]
+                reason_parts = []
+                if shared_details:
+                    reason_parts.append(f"共享资源：{'、'.join(dict.fromkeys(shared_details))}")
+                if capacity_details:
+                    reason_parts.append(f"服装库存容量受限：{'、'.join(dict.fromkeys(capacity_details))}")
                 parallel_reason = (
                     f"与并行组 {', '.join(str(index) for index in conflicting_groups)} "
-                    f"共享资源：{'、'.join(conflict_resources)}"
+                    + "；".join(reason_parts)
                 )
 
             estimated_minutes = min(
@@ -137,6 +199,7 @@ class RehearsalScheduleAgent:
                 title=scene.title,
                 required_characters=characters,
                 props=props,
+                costumes=costumes,
                 estimated_minutes=estimated_minutes,
                 parallel_group=group_index,
                 parallel_reason=parallel_reason,
@@ -169,8 +232,12 @@ class RehearsalScheduleAgent:
             result={
                 "parallel_group_count": len(groups),
                 "groups": [sorted(resources) for resources in groups],
+                "costume_capacities": {
+                    name: capacity
+                    for name, capacity in (resource_context.costume_capacities if resource_context else {}).items()
+                },
             },
-            summary=f"根据演员和道具资源冲突划分为 {len(groups)} 个并行组。",
+            summary=f"根据演员、道具和服装库存容量划分为 {len(groups)} 个并行组。",
         )
         if resource_context is not None:
             self._record_tool_call(
@@ -182,6 +249,7 @@ class RehearsalScheduleAgent:
                     "budget_item_count": len(resource_context.budget_items),
                     "invoice_count": len(resource_context.invoices),
                     "costume_inventory_count": len(resource_context.costume_inventory),
+                    "costume_capacities": resource_context.costume_capacities,
                     "costume_requirement_count": len(resource_context.costume_requirements),
                     "estimated_total": resource_context.estimated_total,
                     "actual_total": resource_context.actual_total,
@@ -194,6 +262,7 @@ class RehearsalScheduleAgent:
                     "invoice_count": len(resource_context.invoices),
                     "costume_inventory_count": len(resource_context.costume_inventory),
                     "costume_issue_count": resource_context.costume_issue_count,
+                    "costume_capacities": resource_context.costume_capacities,
                     "costume_requirement_count": len(resource_context.costume_requirements),
                     "unmatched_costume_requirement_count": resource_context.unmatched_costume_requirement_count,
                     "budget_variance": round(
@@ -247,6 +316,7 @@ class RehearsalScheduleAgent:
         items = list(budget_items or [])
         invoice_records = list(invoices or [])
         costumes = [item for item in inventory or [] if item.category == "costume"]
+        costume_capacities = _costume_capacity_snapshot(costumes)
         requirements = list(costume_requirements or [])
         costume_issues = [
             item for item in costumes
@@ -293,6 +363,7 @@ class RehearsalScheduleAgent:
             budget_items=items,
             invoices=invoice_records,
             costume_inventory=costumes,
+            costume_capacities=costume_capacities,
             costume_requirements=requirements,
             estimated_total=finance.estimated_total,
             actual_total=finance.actual_total,
@@ -582,32 +653,26 @@ class RehearsalScheduleAgent:
                 raise ValueError(f"第 {task.scene_number} 场确认时长不能少于预计时长 {task.estimated_minutes} 分钟")
             validated.append((task, item, start_minutes, end_minutes))
 
-        for index, (task, item, start, end) in enumerate(validated):
-            for other_task, other_item, other_start, other_end in validated[index + 1:]:
-                if item.date != other_item.date or end <= other_start or start >= other_end:
-                    continue
-                shared = self._task_resources(task) & self._task_resources(other_task)
-                if shared:
-                    labels = "、".join(sorted(shared))
-                    raise ValueError(
-                        f"批量确认存在资源冲突：第 {task.scene_number} 场与第 {other_task.scene_number} 场共享{labels}"
-                    )
-
-            for other_task in draft.tasks:
-                if other_task.task_id in selected_ids or not other_task.scheduled_date:
-                    continue
-                if item.date != other_task.scheduled_date:
-                    continue
-                other_start = self._to_minutes(other_task.scheduled_start or "00:00")
-                other_end = self._to_minutes(other_task.scheduled_end or "00:00")
-                if end <= other_start or start >= other_end:
-                    continue
-                shared = self._task_resources(task) & self._task_resources(other_task)
-                if shared:
-                    labels = "、".join(sorted(shared))
-                    raise ValueError(
-                        f"批量确认与已有排班冲突：第 {task.scene_number} 场与第 {other_task.scene_number} 场共享{labels}"
-                    )
+        conflict = self._find_batch_resource_conflict(draft, validated, set(selected_ids))
+        if conflict is not None:
+            kind, label, capacity, left, right = conflict
+            left_task, left_source = left[0], left[1]
+            right_task, right_source = right[0], right[1]
+            prefix = (
+                "批量确认存在资源冲突"
+                if left_source == right_source == "batch"
+                else "批量确认与已有排班冲突"
+            )
+            if kind == "costume":
+                raise ValueError(
+                    f"{prefix}：第 {left_task.scene_number} 场与第 {right_task.scene_number} 场"
+                    f"共同需要服装“{label}”，超出库存容量 {capacity} 件"
+                )
+            resource_label = "演员" if kind == "actor" else "道具"
+            raise ValueError(
+                f"{prefix}：第 {left_task.scene_number} 场与第 {right_task.scene_number} 场"
+                f"共享{resource_label}:{label}"
+            )
 
         room_slots = self._validate_room_bookings(
             [item for _, item, _, _ in validated],
@@ -697,6 +762,95 @@ class RehearsalScheduleAgent:
             *(f"演员:{actor}" for actor in task.required_characters),
             *(f"道具:{prop}" for prop in task.props),
         }
+
+    def _find_batch_resource_conflict(
+        self,
+        draft: ScheduleDraft,
+        validated: list[tuple[ScheduleTask, ScheduleOverrideRequest, int, int]],
+        selected_ids: set[str],
+    ) -> tuple[str, str, int, tuple[ScheduleTask, str, str, int, int], tuple[ScheduleTask, str, str, int, int]] | None:
+        """Find one explainable overlap while respecting costume quantities.
+
+        Actors and props have an implicit capacity of one. Costume capacity is
+        read from the same resource snapshot used for parallel grouping, so a
+        batch can confirm two simultaneous scenes when two usable copies exist.
+        Existing schedule conflicts are tolerated until a newly selected task
+        participates in the overlap; the batch validator should not reject a
+        pre-existing inconsistency on its own.
+        """
+        candidates: list[tuple[ScheduleTask, str, str, int, int]] = [
+            (task, "batch", item.date, start, end)
+            for task, item, start, end in validated
+        ]
+        for task in draft.tasks:
+            if task.task_id in selected_ids or not task.scheduled_date:
+                continue
+            candidates.append((
+                task,
+                "existing",
+                task.scheduled_date,
+                self._to_minutes(task.scheduled_start or "00:00"),
+                self._to_minutes(task.scheduled_end or "00:00"),
+            ))
+
+        costume_capacities = {
+            _normalize_label(name): max(1, capacity)
+            for name, capacity in (draft.resource_context.costume_capacities if draft.resource_context else {}).items()
+        }
+        events: dict[tuple[str, str, str], list[tuple[int, int, int]]] = defaultdict(list)
+        labels: dict[tuple[str, str, str], tuple[str, int]] = {}
+        for candidate_index, (task, _, date, start, end) in enumerate(candidates):
+            entries = [
+                ("actor", actor, 1)
+                for actor in _unique(task.required_characters)
+            ]
+            entries.extend(
+                ("prop", prop, 1)
+                for prop in _unique(task.props)
+            )
+            entries.extend(
+                (
+                    "costume",
+                    costume,
+                    costume_capacities.get(_normalize_label(costume), 1),
+                )
+                for costume in _unique(task.costumes)
+            )
+            for kind, label, capacity in entries:
+                resource_key = _normalize_label(label) if kind == "costume" else label
+                key = (date, kind, resource_key)
+                labels[key] = (label, capacity)
+                events[key].append((start, 1, candidate_index))
+                events[key].append((end, 0, candidate_index))
+
+        for key in sorted(events):
+            active: list[int] = []
+            _, kind, _ = key
+            label, capacity = labels[key]
+            for _, event_type, candidate_index in sorted(events[key], key=lambda item: (item[0], item[1], item[2])):
+                if event_type == 0:
+                    if candidate_index in active:
+                        active.remove(candidate_index)
+                    continue
+                overlapping = [*active, candidate_index]
+                if len(overlapping) > capacity:
+                    selected = [index for index in overlapping if candidates[index][1] == "batch"]
+                    if selected:
+                        if candidates[candidate_index][1] == "batch":
+                            selected_index = candidate_index
+                            other_index = next(index for index in active if index != selected_index)
+                        else:
+                            selected_index = next(index for index in active if candidates[index][1] == "batch")
+                            other_index = candidate_index
+                        return (
+                            kind,
+                            label,
+                            capacity,
+                            candidates[selected_index],
+                            candidates[other_index],
+                        )
+                active.append(candidate_index)
+        return None
 
     @staticmethod
     def _validate_room_bookings(

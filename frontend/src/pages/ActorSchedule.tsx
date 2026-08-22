@@ -639,7 +639,7 @@ function ScheduleOverview({
             <div className="rounded-lg bg-background/45 px-2.5 py-2 text-[11px] text-dim">已核验 <span className="font-mono text-teal">¥{schedule.resource_context.verified_invoice_total.toFixed(2)}</span></div>
           </div>
           {(schedule.resource_context.music_cues.length > 0 || schedule.resource_context.budget_items.length > 0 || schedule.resource_context.invoices.length > 0 || schedule.resource_context.costume_inventory.length > 0 || schedule.resource_context.costume_requirements.length > 0) && (
-            <div className="mt-3 grid gap-2 text-[11px] leading-5 text-dim md:grid-cols-5">
+            <div className="mt-3 grid gap-2 text-[11px] leading-5 text-dim md:grid-cols-6">
               <div>
                 <div className="font-medium text-text">配乐提示</div>
                 <div>{schedule.resource_context.music_cues.slice(0, 4).map((cue) => `${cue.track_name}${cue.scene_id ? ` · ${cue.scene_id}` : ""}`).join("；") || "无"}</div>
@@ -655,6 +655,10 @@ function ScheduleOverview({
               <div>
                 <div className="font-medium text-text">服装库存</div>
                 <div>{schedule.resource_context.costume_inventory.slice(0, 4).map((item) => `${item.name} · ${item.status}${item.quantity > 0 ? ` · ${item.quantity} 件` : ""}`).join("；") || "无"}</div>
+              </div>
+              <div>
+                <div className="font-medium text-text">服装并行容量</div>
+                <div>{Object.entries(schedule.resource_context.costume_capacities).slice(0, 4).map(([name, capacity]) => `${name} ×${capacity}件`).join("；") || "未登记，按 1 件保守"}</div>
               </div>
               <div>
                 <div className="font-medium text-text">剧本服装需求</div>

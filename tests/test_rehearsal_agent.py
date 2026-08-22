@@ -588,6 +588,7 @@ def test_schedule_agent_captures_music_and_budget_context():
     assert draft.resource_context.verified_invoice_total == 0
     assert draft.resource_context.unlinked_invoice_count == 1
     assert len(draft.resource_context.costume_inventory) == 2
+    assert draft.resource_context.costume_capacities == {"灰色外套": 1, "红色围巾": 1}
     assert draft.resource_context.costume_issue_count == 2
     assert [item.name for item in draft.resource_context.costume_requirements] == ["灰色外套"]
     assert draft.resource_context.unmatched_costume_requirement_count == 0
@@ -607,6 +608,7 @@ def test_schedule_agent_captures_music_and_budget_context():
         "unlinked_invoice_count": 1,
         "costume_inventory_count": 2,
         "costume_issue_count": 2,
+        "costume_capacities": {"灰色外套": 1, "红色围巾": 1},
         "costume_requirement_count": 1,
         "unmatched_costume_requirement_count": 0,
         "warning_count": 4,
@@ -637,7 +639,66 @@ def test_schedule_agent_marks_unmatched_costume_requirement():
     assert draft.resource_context is not None
     assert draft.resource_context.costume_requirements[0].source_lines == [2]
     assert draft.resource_context.unmatched_costume_requirement_count == 1
+    assert draft.resource_context.costume_capacities == {"灰色外套": 1}
     assert any("黑色西装" in warning and "未匹配服装需求" in warning for warning in draft.resource_context.warnings)
+
+
+def test_schedule_agent_respects_costume_inventory_capacity_for_parallel_groups_and_batches():
+    analysis = ScriptAnalysisAgent().run(
+        title="服装容量测试",
+        version_label="v1",
+        script_text=(
+            "第一场\n（林澄穿灰色外套。）\n林澄：开始。\n"
+            "第二场\n（顾言穿灰色外套。）\n顾言：开始。\n"
+            "第三场\n（导演穿灰色外套。）\n导演：开始。"
+        ),
+        script_id="costume-capacity",
+        analysis_mode="rules",
+    ).model_copy(update={"review_status": "confirmed"})
+    agent = RehearsalScheduleAgent()
+
+    double_inventory = [ResourceInventoryItem(
+        resource_id="costume-double",
+        category="costume",
+        name="灰色外套",
+        quantity=2,
+        status="available",
+        location="服装柜",
+    )]
+    double_draft = agent.run(analysis, inventory=double_inventory)
+    assert double_draft.resource_context is not None
+    assert double_draft.resource_context.costume_capacities == {"灰色外套": 2}
+    assert [task.parallel_group for task in double_draft.tasks] == [1, 1, 2]
+    assert "服装库存容量受限" in double_draft.tasks[2].parallel_reason
+    assert "库存容量 2" in double_draft.tasks[2].parallel_reason
+
+    triple_inventory = [ResourceInventoryItem(
+        resource_id="costume-triple",
+        category="costume",
+        name="灰色外套",
+        quantity=3,
+        status="available",
+        location="服装柜",
+    )]
+    triple_draft = agent.run(analysis, inventory=triple_inventory)
+    assert [task.parallel_group for task in triple_draft.tasks] == [1, 1, 1]
+
+    planned = agent.assign(double_draft, [
+        AvailabilitySlot(actor=actor, date="2026-08-25", start="19:00", end="21:00")
+        for actor in ("林澄", "顾言", "导演")
+    ])
+    batch = [ScheduleOverrideRequest(
+        task_id=task.task_id,
+        date="2026-08-26",
+        start="19:00",
+        end="19:45",
+    ) for task in planned.tasks]
+    try:
+        agent.apply_manual_overrides(planned, batch)
+    except ValueError as exc:
+        assert "超出库存容量 2 件" in str(exc)
+    else:
+        raise AssertionError("three concurrent costume users must exceed capacity two")
 
 
 def test_line_reading_follows_selected_role_and_source_lines():
@@ -1656,6 +1717,6 @@ def test_rehearsal_agent_eval_set_is_reproducible_without_provider_keys():
 
     report = evaluate_cases()
 
-    assert report["total"] == 11
+    assert report["total"] == 12
     assert report["failed"] == 0
     assert report["pass_rate"] == 100.0

@@ -356,6 +356,13 @@ def _evaluate_schedule(case: dict[str, Any], checks: list[CheckResult]) -> None:
                     resource_context.unmatched_costume_requirement_count,
                     resource_expected["unmatched_costume_requirement_count"],
                 )
+            if "costume_capacities" in resource_expected:
+                _check(
+                    checks,
+                    "resource_costume_capacities",
+                    resource_context.costume_capacities,
+                    resource_expected["costume_capacities"],
+                )
             _check(checks, "resource_estimated_total", resource_context.estimated_total, resource_expected["estimated_total"])
             _check(checks, "resource_actual_total", resource_context.actual_total, resource_expected["actual_total"])
             _check(checks, "resource_invoice_total", resource_context.invoice_total, resource_expected["invoice_total"])
