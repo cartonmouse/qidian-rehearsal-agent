@@ -1106,12 +1106,16 @@ class ScheduleTask(BaseModel):
 
 
 class ScheduleResourceContext(BaseModel):
-    """The music and budget snapshot used while generating a schedule draft."""
+    """The resource snapshot used while generating a schedule draft."""
 
     music_cues: list[MusicTimelineNote] = Field(default_factory=list)
     budget_items: list[BudgetLineItem] = Field(default_factory=list)
+    invoices: list[InvoiceRecord] = Field(default_factory=list)
     estimated_total: float = Field(default=0, ge=0)
     actual_total: float = Field(default=0, ge=0)
+    invoice_total: float = Field(default=0, ge=0)
+    verified_invoice_total: float = Field(default=0, ge=0)
+    unlinked_invoice_count: int = Field(default=0, ge=0)
     warnings: list[str] = Field(default_factory=list)
 
 

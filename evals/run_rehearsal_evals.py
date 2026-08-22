@@ -21,6 +21,7 @@ from backend.rehearsal.agent import ScriptAnalysisAgent
 from backend.rehearsal.models import (
     AvailabilitySlot,
     BudgetLineItem,
+    InvoiceRecord,
     LineReadingRequest,
     MusicTimelineNote,
     ResourceInventoryItem,
@@ -282,6 +283,7 @@ def _evaluate_schedule(case: dict[str, Any], checks: list[CheckResult]) -> None:
     plan_run_id = linkage.get("plan_run_id")
     music_notes = [MusicTimelineNote(**payload) for payload in case.get("music_notes", [])]
     budget_items = [BudgetLineItem(**payload) for payload in case.get("budget_items", [])]
+    invoices = [InvoiceRecord(**payload) for payload in case.get("invoices", [])]
     draft = agent.run(
         analysis,
         default_minutes=int(case.get("default_minutes", 45)),
@@ -289,6 +291,7 @@ def _evaluate_schedule(case: dict[str, Any], checks: list[CheckResult]) -> None:
         root_run_id=draft_run_id,
         music_notes=music_notes,
         budget_items=budget_items,
+        invoices=invoices,
     )
     slots = [AvailabilitySlot(**payload) for payload in case.get("slots", [])]
     planned = agent.assign(
@@ -321,12 +324,18 @@ def _evaluate_schedule(case: dict[str, Any], checks: list[CheckResult]) -> None:
         if resource_context is not None:
             _check(checks, "resource_music_count", len(resource_context.music_cues), resource_expected["music_count"])
             _check(checks, "resource_budget_count", len(resource_context.budget_items), resource_expected["budget_count"])
+            _check(checks, "resource_invoice_count", len(resource_context.invoices), resource_expected["invoice_count"])
             _check(checks, "resource_estimated_total", resource_context.estimated_total, resource_expected["estimated_total"])
             _check(checks, "resource_actual_total", resource_context.actual_total, resource_expected["actual_total"])
+            _check(checks, "resource_invoice_total", resource_context.invoice_total, resource_expected["invoice_total"])
+            _check(checks, "resource_verified_invoice_total", resource_context.verified_invoice_total, resource_expected["verified_invoice_total"])
+            _check(checks, "resource_unlinked_invoice_count", resource_context.unlinked_invoice_count, resource_expected["unlinked_invoice_count"])
             warning_contains = resource_expected.get("warning_contains")
             if warning_contains:
                 warning_found = any(warning_contains in warning for warning in resource_context.warnings)
                 _check(checks, "resource_warning", warning_found, True, passed=warning_found)
+            if "warning_count" in resource_expected:
+                _check(checks, "resource_warning_count", len(resource_context.warnings), resource_expected["warning_count"])
         resource_calls = [call for call in planned.tool_calls if call.tool_name == "inspect_rehearsal_resources"]
         _check(checks, "resource_tool_call", len(resource_calls) == 1, True)
     if "parallel_groups" in expected:

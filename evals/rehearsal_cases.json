@@ -133,6 +133,9 @@
     "budget_items": [
       {"category": "music", "name": "配乐授权", "estimated_amount": 100, "actual_amount": 120, "status": "committed", "note": "待复核"}
     ],
+    "invoices": [
+      {"supplier": "奇点文化", "invoice_date": "2026-08-25", "category": "music", "amount": 80, "budget_item_id": "missing-budget-item", "status": "pending", "note": "待关联预算"}
+    ],
     "expected": {
       "task_count": 2,
       "scheduled_count": 2,
@@ -140,12 +143,17 @@
       "resource_context": {
         "music_count": 1,
         "budget_count": 1,
+        "invoice_count": 1,
         "estimated_total": 100.0,
         "actual_total": 120.0,
-        "warning_contains": "超出预计金额"
+        "invoice_total": 80.0,
+        "verified_invoice_total": 0.0,
+        "unlinked_invoice_count": 1,
+        "warning_contains": "未关联预算项目",
+        "warning_count": 3
       },
       "tool_result_keys_by_name": {
-        "inspect_rehearsal_resources": ["music_cue_count", "budget_item_count", "budget_variance", "warning_count"]
+        "inspect_rehearsal_resources": ["music_cue_count", "budget_item_count", "invoice_count", "budget_variance", "invoice_total", "verified_invoice_total", "unlinked_invoice_count", "warning_count"]
       },
       "parallel_groups": [1, 2],
       "first_task_end_equals_second_start": true,

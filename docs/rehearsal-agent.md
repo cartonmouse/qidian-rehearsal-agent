@@ -58,7 +58,7 @@
 
 当完整排练没有共同档期时，排班 Agent 不直接结束流程，而是为任务返回 `conflict_priority` 和 `alternatives`：如果存在较短共同区间，建议压缩时长；多演员冲突时建议分组排练；缺少演员档期时明确要求补齐对应角色。导演可以调用 `POST /api/rehearsal/scripts/{script_id}/schedule/override` 提交单个确认，或调用 `POST /api/rehearsal/scripts/{script_id}/schedule/override-batch` 一次提交 `{"overrides":[{"task_id":"scene-task-1","date":"2026-08-26","start":"19:00","end":"19:45","room_name":"排练室 A","note":"导演确认"}]}`。如果请求携带 `room_name`，调度 Agent 会调用 `validate_room_booking` 检查用户已有预约以及批次内重叠；跨日期的同一排练室可以分别确认，同日期重叠则返回 `409`。批量接口还会校验整批任务、时长、重复任务、已确认状态和共享演员/道具冲突，成功返回 `atomic=true`、`confirmed_task_ids`、`overridden_count` 以及完整 `schedule`；任一项失败时整批返回 `409`，不会保存部分结果。若导演要修改已经人工确认的单个任务，应使用单任务覆盖接口，避免批量重试产生重复运行记录。
 
-调度草案还会在生成时读取当前用户的配乐时间轴和预算条目，写入 `resource_context` 快照。快照包含配乐提示点、预算项目、预计/实际金额和风险 warning；当资源非空时，工具调用链会增加 `inspect_rehearsal_resources`，运行记录 trace 会说明读取了哪些资源。实际预算超过预计金额只会触发“请人工确认”的 warning，不会自动改写预算或阻止排练。资源在草案生成后发生变化时，需要重新生成调度以获得新的快照。
+调度草案还会在生成时读取当前用户的配乐时间轴、预算条目和发票元数据，写入 `resource_context` 快照。快照包含配乐提示点、预算项目、发票记录、预计/实际金额、发票总额、已核验金额和风险 warning；当资源非空时，工具调用链会增加 `inspect_rehearsal_resources`，运行记录 trace 会说明读取了哪些资源。实际预算超过预计金额、发票未关联预算项目或仍待核验时，只触发“请人工确认”的 warning，不会自动改写预算或确认付款。资源在草案生成后发生变化时，需要重新生成调度以获得新的快照。
 
 ### 对词 Agent MVP
 

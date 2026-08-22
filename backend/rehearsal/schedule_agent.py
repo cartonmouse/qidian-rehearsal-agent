@@ -5,9 +5,11 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timezone
 
+from backend.rehearsal.finance_agent import ResourceFinanceAgent
 from backend.rehearsal.models import (
     AvailabilitySlot,
     BudgetLineItem,
+    InvoiceRecord,
     MusicTimelineNote,
     ScheduleAlternative,
     ScheduleDraft,
@@ -50,6 +52,7 @@ class RehearsalScheduleAgent:
         root_run_id: str | None = None,
         music_notes: list[MusicTimelineNote] | None = None,
         budget_items: list[BudgetLineItem] | None = None,
+        invoices: list[InvoiceRecord] | None = None,
     ) -> ScheduleDraft:
         if analysis.review_status == "pending" and not preview:
             raise ValueError("剧本尚未完成人工确认，不能生成排练调度")
@@ -57,7 +60,7 @@ class RehearsalScheduleAgent:
         groups: list[set[str]] = []
         tasks: list[ScheduleTask] = []
         tool_calls: list[ScheduleToolCall] = []
-        resource_context = self._build_resource_context(music_notes, budget_items)
+        resource_context = self._build_resource_context(music_notes, budget_items, invoices)
         self._record_tool_call(
             tool_calls,
             tool_name="inspect_script",
@@ -161,21 +164,29 @@ class RehearsalScheduleAgent:
                 arguments={
                     "music_note_count": len(resource_context.music_cues),
                     "budget_item_count": len(resource_context.budget_items),
+                    "invoice_count": len(resource_context.invoices),
                     "estimated_total": resource_context.estimated_total,
                     "actual_total": resource_context.actual_total,
+                    "invoice_total": resource_context.invoice_total,
+                    "verified_invoice_total": resource_context.verified_invoice_total,
                 },
                 result={
                     "music_cue_count": len(resource_context.music_cues),
                     "budget_item_count": len(resource_context.budget_items),
+                    "invoice_count": len(resource_context.invoices),
                     "budget_variance": round(
                         resource_context.actual_total - resource_context.estimated_total,
                         2,
                     ),
+                    "invoice_total": resource_context.invoice_total,
+                    "verified_invoice_total": resource_context.verified_invoice_total,
+                    "unlinked_invoice_count": resource_context.unlinked_invoice_count,
                     "warning_count": len(resource_context.warnings),
                 },
                 summary=(
                     f"读取 {len(resource_context.music_cues)} 个配乐提示点和 "
-                    f"{len(resource_context.budget_items)} 个预算项目，供排练任务复核。"
+                    f"{len(resource_context.budget_items)} 个预算项目、"
+                    f"{len(resource_context.invoices)} 张发票，供排练任务复核。"
                 ),
             )
         self._record_tool_call(
@@ -204,23 +215,38 @@ class RehearsalScheduleAgent:
     def _build_resource_context(
         music_notes: list[MusicTimelineNote] | None,
         budget_items: list[BudgetLineItem] | None,
+        invoices: list[InvoiceRecord] | None,
     ) -> ScheduleResourceContext | None:
         music_cues = list(music_notes or [])
         items = list(budget_items or [])
-        if not music_cues and not items:
+        invoice_records = list(invoices or [])
+        if not music_cues and not items and not invoice_records:
             return None
 
-        estimated_total = round(sum(item.estimated_amount for item in items), 2)
-        actual_total = round(sum(item.actual_amount for item in items), 2)
-        warnings: list[str] = []
-        if actual_total > estimated_total:
-            warnings.append("当前预算实际金额已超出预计金额，请人工确认。")
+        finance = ResourceFinanceAgent().summarize(items, invoice_records)
+        valid_budget_ids = {
+            item.budget_item_id
+            for item in items
+            if item.status != "cancelled"
+        }
+        accepted_invoices = [
+            invoice for invoice in invoice_records
+            if invoice.status != "rejected"
+        ]
+        unlinked_invoice_count = sum(
+            invoice.budget_item_id not in valid_budget_ids
+            for invoice in accepted_invoices
+        )
         return ScheduleResourceContext(
             music_cues=music_cues,
             budget_items=items,
-            estimated_total=estimated_total,
-            actual_total=actual_total,
-            warnings=warnings,
+            invoices=invoice_records,
+            estimated_total=finance.estimated_total,
+            actual_total=finance.actual_total,
+            invoice_total=finance.invoice_total,
+            verified_invoice_total=finance.verified_invoice_total,
+            unlinked_invoice_count=unlinked_invoice_count,
+            warnings=list(finance.warnings),
         )
 
     def assign(

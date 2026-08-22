@@ -622,20 +622,23 @@ function ScheduleOverview({
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
               <div className="text-xs font-medium text-text">调度 Agent 使用的资源快照</div>
-              <div className="mt-1 text-[11px] leading-5 text-dim">生成草案时读取配乐时间轴与预算；资源发生变化后请重新生成草案。</div>
+              <div className="mt-1 text-[11px] leading-5 text-dim">生成草案时读取配乐、预算与发票；资源发生变化后请重新生成草案。</div>
             </div>
             <div className="flex flex-wrap gap-1.5 text-[10px]">
               <span className="rounded-full bg-teal/10 px-2 py-1 text-teal">配乐 {schedule.resource_context.music_cues.length} 个提示点</span>
               <span className="rounded-full bg-orange/10 px-2 py-1 text-orange">预算 {schedule.resource_context.budget_items.length} 项</span>
+              <span className="rounded-full bg-primary/10 px-2 py-1 text-primary">发票 {schedule.resource_context.invoices.length} 张</span>
             </div>
           </div>
-          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
             <div className="rounded-lg bg-background/45 px-2.5 py-2 text-[11px] text-dim">预计预算 <span className="font-mono text-text">¥{schedule.resource_context.estimated_total.toFixed(2)}</span></div>
             <div className={cn("rounded-lg bg-background/45 px-2.5 py-2 text-[11px]", schedule.resource_context.actual_total > schedule.resource_context.estimated_total ? "text-red" : "text-dim")}>实际预算 <span className="font-mono">¥{schedule.resource_context.actual_total.toFixed(2)}</span></div>
             <div className="rounded-lg bg-background/45 px-2.5 py-2 text-[11px] text-dim">预算差额 <span className={cn("font-mono", schedule.resource_context.actual_total > schedule.resource_context.estimated_total ? "text-red" : "text-teal")}>¥{(schedule.resource_context.actual_total - schedule.resource_context.estimated_total).toFixed(2)}</span></div>
+            <div className="rounded-lg bg-background/45 px-2.5 py-2 text-[11px] text-dim">发票总额 <span className="font-mono text-text">¥{schedule.resource_context.invoice_total.toFixed(2)}</span></div>
+            <div className="rounded-lg bg-background/45 px-2.5 py-2 text-[11px] text-dim">已核验 <span className="font-mono text-teal">¥{schedule.resource_context.verified_invoice_total.toFixed(2)}</span></div>
           </div>
-          {(schedule.resource_context.music_cues.length > 0 || schedule.resource_context.budget_items.length > 0) && (
-            <div className="mt-3 grid gap-2 text-[11px] leading-5 text-dim md:grid-cols-2">
+          {(schedule.resource_context.music_cues.length > 0 || schedule.resource_context.budget_items.length > 0 || schedule.resource_context.invoices.length > 0) && (
+            <div className="mt-3 grid gap-2 text-[11px] leading-5 text-dim md:grid-cols-3">
               <div>
                 <div className="font-medium text-text">配乐提示</div>
                 <div>{schedule.resource_context.music_cues.slice(0, 4).map((cue) => `${cue.track_name}${cue.scene_id ? ` · ${cue.scene_id}` : ""}`).join("；") || "无"}</div>
@@ -643,6 +646,10 @@ function ScheduleOverview({
               <div>
                 <div className="font-medium text-text">预算项目</div>
                 <div>{schedule.resource_context.budget_items.slice(0, 4).map((item) => `${item.name} ¥${item.actual_amount.toFixed(2)}`).join("；") || "无"}</div>
+              </div>
+              <div>
+                <div className="font-medium text-text">发票状态</div>
+                <div>{schedule.resource_context.invoices.slice(0, 4).map((invoice) => `${invoice.supplier} ¥${invoice.amount.toFixed(2)} · ${invoice.status}`).join("；") || "无"}</div>
               </div>
             </div>
           )}

@@ -550,6 +550,14 @@ def test_schedule_agent_captures_music_and_budget_context():
             actual_amount=120,
             status="committed",
         )],
+        invoices=[InvoiceRecord(
+            supplier="奇点文化",
+            invoice_date="2026-08-25",
+            category="music",
+            amount=80,
+            budget_item_id="missing-budget-item",
+            status="pending",
+        )],
     )
 
     assert draft.resource_context is not None
@@ -557,14 +565,23 @@ def test_schedule_agent_captures_music_and_budget_context():
     assert len(draft.resource_context.budget_items) == 1
     assert draft.resource_context.estimated_total == 100
     assert draft.resource_context.actual_total == 120
-    assert "超出预计金额" in draft.resource_context.warnings[0]
+    assert len(draft.resource_context.invoices) == 1
+    assert draft.resource_context.invoice_total == 80
+    assert draft.resource_context.verified_invoice_total == 0
+    assert draft.resource_context.unlinked_invoice_count == 1
+    assert "超出预算" in draft.resource_context.warnings[0]
+    assert any("未关联预算项目" in warning for warning in draft.resource_context.warnings)
     resource_calls = [call for call in draft.tool_calls if call.tool_name == "inspect_rehearsal_resources"]
     assert len(resource_calls) == 1
     assert resource_calls[0].result == {
         "music_cue_count": 1,
         "budget_item_count": 1,
+        "invoice_count": 1,
         "budget_variance": 20,
-        "warning_count": 1,
+        "invoice_total": 80,
+        "verified_invoice_total": 0,
+        "unlinked_invoice_count": 1,
+        "warning_count": 3,
     }
 
 
