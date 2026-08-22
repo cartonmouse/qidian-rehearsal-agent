@@ -36,6 +36,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { useSearchParams } from "react-router-dom";
 
 const PAGE_CLASS = "flex-1 w-full max-w-[1800px] mx-auto px-4 py-5 md:px-7 md:py-6 xl:px-8";
 const INPUT_CLASS = "mt-1.5 h-9 w-full rounded-lg border border-border bg-input px-2.5 text-sm text-text outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent/30";
@@ -70,6 +71,7 @@ function today() {
 }
 
 export default function ResourceManagement() {
+  const [searchParams] = useSearchParams();
   const [inventory, setInventory] = useState<ResourceInventoryItem[]>([]);
   const [audits, setAudits] = useState<ResourceAuditRecord[]>([]);
   const [bookings, setBookings] = useState<RoomBooking[]>([]);
@@ -91,6 +93,12 @@ export default function ResourceManagement() {
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const focusedAuditId = searchParams.get("audit_id") || "";
+  const reviewScene = searchParams.get("scene") || "";
+  const reviewProps = useMemo(
+    () => (searchParams.get("props") || "").split("、").map((item) => item.trim()).filter(Boolean),
+    [searchParams],
+  );
 
   const selectedScript = useMemo(
     () => scripts.find((script) => script.script_id === selectedScriptId) || null,
@@ -100,7 +108,7 @@ export default function ResourceManagement() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    void Promise.all([getResourceInventory(), getRoomBookings(), getScripts(), getResourceAudits(20)])
+    void Promise.all([getResourceInventory(), getRoomBookings(), getScripts(), getResourceAudits(200)])
       .then(([items, roomItems, scriptItems, auditItems]) => {
         if (cancelled) return;
         setInventory(items);
@@ -126,7 +134,7 @@ export default function ResourceManagement() {
 
   async function refreshAudits() {
     try {
-      setAudits(await getResourceAudits(20));
+      setAudits(await getResourceAudits(200));
     } catch {
       // The resource write has already succeeded; the audit panel can refresh later.
     }
@@ -316,7 +324,12 @@ export default function ResourceManagement() {
         onCheck={() => void runResourceCheck()}
       />
 
-      <ResourceAuditCard audits={audits} />
+      <ResourceAuditCard
+        audits={audits}
+        focusedAuditId={focusedAuditId}
+        reviewScene={reviewScene}
+        reviewProps={reviewProps}
+      />
     </div>
   );
 }
@@ -649,7 +662,34 @@ const AUDIT_CHANGE_LABELS: Record<ResourceAuditRecord["changes"][number]["change
   deleted: "删除",
 };
 
-function ResourceAuditCard({ audits }: { audits: ResourceAuditRecord[] }) {
+function ResourceAuditCard({
+  audits,
+  focusedAuditId,
+  reviewScene,
+  reviewProps,
+}: {
+  audits: ResourceAuditRecord[];
+  focusedAuditId: string;
+  reviewScene: string;
+  reviewProps: string[];
+}) {
+  const [resourceFilter, setResourceFilter] = useState<ResourceAuditRecord["resource_type"] | "all">("all");
+  const [changeFilter, setChangeFilter] = useState<ResourceAuditRecord["changes"][number]["change_type"] | "all">("all");
+  const [query, setQuery] = useState("");
+  const visibleAudits = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase();
+    return audits.filter((audit) => {
+      if (resourceFilter !== "all" && audit.resource_type !== resourceFilter) return false;
+      if (changeFilter !== "all" && !audit.changes.some((change) => change.change_type === changeFilter)) return false;
+      if (!needle) return true;
+      const searchable = [
+        audit.summary,
+        ...audit.changes.flatMap((change) => [change.label, change.summary, ...change.changed_fields]),
+      ].join(" ").toLocaleLowerCase();
+      return searchable.includes(needle);
+    });
+  }, [audits, changeFilter, query, resourceFilter]);
+
   return (
     <Card>
       <CardContent className="p-4 md:p-5">
@@ -658,15 +698,56 @@ function ResourceAuditCard({ audits }: { audits: ResourceAuditRecord[] }) {
             <div className="flex items-center gap-2 text-sm font-semibold text-text"><History size={16} className="text-primary" />资源变更记录</div>
             <p className="mt-1 text-xs leading-5 text-dim">保留库存、排练室、配乐、预算和发票的最近变更，方便解释 Resource Agent 使用了哪一版人工确认数据。</p>
           </div>
-          <span className="rounded-full border border-primary/20 bg-primary/8 px-2 py-1 text-[10px] text-primary">{audits.length} 条</span>
+          <span className="rounded-full border border-primary/20 bg-primary/8 px-2 py-1 text-[10px] text-primary">{visibleAudits.length}/{audits.length} 条</span>
         </div>
 
-        {audits.length === 0 ? (
+        {(reviewScene || reviewProps.length > 0) && (
+          <div className="mt-3 rounded-xl border border-orange/25 bg-orange/6 px-3 py-2.5 text-xs leading-5 text-orange">
+            <div className="font-medium">版本复核上下文{reviewScene ? ` · ${reviewScene}` : ""}</div>
+            <div className="mt-0.5">请重点确认：{reviewProps.length > 0 ? reviewProps.join("、") : "当前场次的库存与资源状态"}。{focusedAuditId ? " 已定位到相关资源变更。" : ""}</div>
+          </div>
+        )}
+
+        <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_150px_150px]">
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="搜索资源名称、摘要或变更字段"
+            className="h-9 rounded-lg border border-border bg-input px-2.5 text-xs text-text outline-none focus:border-accent"
+            aria-label="搜索资源审计"
+          />
+          <select
+            value={resourceFilter}
+            onChange={(event) => setResourceFilter(event.target.value as ResourceAuditRecord["resource_type"] | "all")}
+            className="h-9 rounded-lg border border-border bg-input px-2.5 text-xs text-text outline-none focus:border-accent"
+            aria-label="按资源类型筛选"
+          >
+            <option value="all">全部资源类型</option>
+            <option value="inventory">库存</option>
+            <option value="room">排练室预约</option>
+            <option value="music">配乐时间轴</option>
+            <option value="budget">预算</option>
+            <option value="invoice">发票</option>
+          </select>
+          <select
+            value={changeFilter}
+            onChange={(event) => setChangeFilter(event.target.value as ResourceAuditRecord["changes"][number]["change_type"] | "all")}
+            className="h-9 rounded-lg border border-border bg-input px-2.5 text-xs text-text outline-none focus:border-accent"
+            aria-label="按变更类型筛选"
+          >
+            <option value="all">全部变更类型</option>
+            <option value="created">新增</option>
+            <option value="updated">修改</option>
+            <option value="deleted">删除</option>
+          </select>
+        </div>
+
+        {visibleAudits.length === 0 ? (
           <div className="mt-4 rounded-xl border border-dashed border-border bg-background/35 px-4 py-6 text-center text-sm text-dim">保存一次库存或资源信息后，这里会显示变更摘要。</div>
         ) : (
           <div className="mt-3 divide-y divide-border/70">
-            {audits.map((audit) => (
-              <div key={audit.audit_id} className="py-3 first:pt-0 last:pb-0">
+            {visibleAudits.map((audit) => (
+              <div key={audit.audit_id} className={cn("py-3 first:pt-0 last:pb-0", audit.audit_id === focusedAuditId && "rounded-xl bg-orange/6 px-3 ring-1 ring-orange/25")}>
                 <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-2 text-sm font-medium text-text">
                     <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary">{AUDIT_RESOURCE_LABELS[audit.resource_type]}</span>

@@ -28,7 +28,7 @@ from backend.rehearsal.run_metrics import AgentRunMetricsAgent
 from backend.rehearsal.schedule_agent import RehearsalScheduleAgent
 from backend.rehearsal.stage_agent import StageVisualizationAgent
 from backend.rehearsal.suggestion_agent import SuggestionInboxAgent
-from backend.rehearsal.version_diff import ScriptVersionDiffAgent
+from backend.rehearsal.version_diff import ScriptVersionDiffAgent, attach_resource_audit_matches
 from backend.rehearsal.models import (
     AvailabilitySlot,
     AvailabilityUpdateRequest,
@@ -167,10 +167,19 @@ def write_resource_inventory(
 @router.get("/resources/audit", response_model=list[ResourceAuditRecord])
 def read_resource_audits(
     limit: int = Query(default=50, ge=1, le=200),
+    resource_type: Literal["inventory", "room", "music", "budget", "invoice"] | None = Query(default=None),
+    change_type: Literal["created", "updated", "deleted"] | None = Query(default=None),
+    query: str | None = Query(default=None, max_length=100),
     user_id: str = Depends(get_current_user),
 ):
-    """Read recent user-scoped changes to rehearsal resources."""
-    return list_resource_audits(user_id=user_id, limit=limit)
+    """Read filtered, recent user-scoped changes to rehearsal resources."""
+    return list_resource_audits(
+        user_id=user_id,
+        limit=limit,
+        resource_type=resource_type,
+        change_type=change_type,
+        query=query,
+    )
 
 
 @router.get("/resources/rooms", response_model=list[RoomBooking])
@@ -577,7 +586,11 @@ def compare_script_versions(
         raise HTTPException(404, "目标剧本版本不存在")
     if previous is None:
         raise HTTPException(404, "待比较的剧本版本不存在")
-    return ScriptVersionDiffAgent().compare(previous, current)
+    diff = ScriptVersionDiffAgent().compare(previous, current)
+    return attach_resource_audit_matches(
+        diff,
+        list_resource_audits(user_id=user_id, limit=200),
+    )
 
 
 @router.get("/scripts/{script_id}/stage/{scene_id}", response_model=StageVisualization)

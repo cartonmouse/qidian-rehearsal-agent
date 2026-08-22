@@ -389,7 +389,14 @@ def save_resource_audit(record: ResourceAuditRecord, *, user_id: str) -> None:
     )
 
 
-def list_resource_audits(*, user_id: str, limit: int = 50) -> list[ResourceAuditRecord]:
+def list_resource_audits(
+    *,
+    user_id: str,
+    limit: int = 50,
+    resource_type: str | None = None,
+    change_type: str | None = None,
+    query: str | None = None,
+) -> list[ResourceAuditRecord]:
     path = _resource_audit_path(user_id)
     if not path.exists():
         return []
@@ -398,13 +405,28 @@ def list_resource_audits(*, user_id: str, limit: int = 50) -> list[ResourceAudit
     except (OSError, ValueError, TypeError):
         return []
     result: list[ResourceAuditRecord] = []
+    needle = query.strip().casefold() if query else ""
     for item in payload:
         if len(result) >= limit:
             break
         try:
-            result.append(ResourceAuditRecord.model_validate(item))
+            record = ResourceAuditRecord.model_validate(item)
         except (ValueError, TypeError):
             continue
+        if resource_type and record.resource_type != resource_type:
+            continue
+        if change_type and not any(change.change_type == change_type for change in record.changes):
+            continue
+        if needle:
+            searchable = " ".join([
+                record.summary,
+                *(change.label for change in record.changes),
+                *(change.summary for change in record.changes),
+                *(field for change in record.changes for field in change.changed_fields),
+            ]).casefold()
+            if needle not in searchable:
+                continue
+        result.append(record)
     return result
 
 

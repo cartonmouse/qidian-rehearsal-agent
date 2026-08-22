@@ -232,6 +232,18 @@ class ResourceAuditRecord(BaseModel):
     created_at: str
 
 
+class VersionResourceAuditMatch(BaseModel):
+    """A user-scoped resource change matched to a changed script prop."""
+
+    audit_id: str
+    resource_type: Literal["inventory", "room", "music", "budget", "invoice"]
+    change_type: Literal["created", "updated", "deleted"]
+    resource_id: str
+    label: str
+    summary: str
+    created_at: str
+
+
 class RoomBookingRequest(BaseModel):
     room_name: str = Field(min_length=1, max_length=200)
     date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
@@ -876,6 +888,7 @@ class VersionDownstreamImpact(BaseModel):
     scene_title: str = ""
     affected_characters: list[str] = Field(default_factory=list)
     affected_props: list[str] = Field(default_factory=list)
+    resource_audit_matches: list[VersionResourceAuditMatch] = Field(default_factory=list)
     reason: str
     action: str
 

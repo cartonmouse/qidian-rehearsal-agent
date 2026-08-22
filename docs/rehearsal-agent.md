@@ -121,7 +121,7 @@ LLM 回答必须引用检索结果中的证据 ID，并通过 Pydantic 校验；
 - 新增、删除、修改的台词，以及旧行号/新行号；
 - 受影响演员、道具和需要重新核对台词的角色。
 
-响应还会生成 `downstream_impacts`：每个受影响场次分别给出 `schedule`、`line-reading` 或 `resource` 类型、严重级别、受影响演员/道具、触发原因和建议动作，并用 `requires_schedule_review`、`requires_line_reading_review`、`requires_resource_review` 汇总是否需要复核。版本追踪页面会把这些提醒展示成可操作卡片，分别跳转到演员排练表、对词训练和资源管理；它不会自动覆盖已有排班或对词进度，最终动作仍由导演确认。
+响应还会生成 `downstream_impacts`：每个受影响场次分别给出 `schedule`、`line-reading` 或 `resource` 类型、严重级别、受影响演员/道具、触发原因和建议动作，并用 `requires_schedule_review`、`requires_line_reading_review`、`requires_resource_review` 汇总是否需要复核。`resource` 影响还会包含 `resource_audit_matches`，按道具名称匹配当前用户近期资源审计中的新增、修改或删除记录。版本追踪页面会把这些提醒展示成可操作卡片，分别跳转到演员排练表、对词训练和带复核上下文的资源管理；它不会自动覆盖已有排班或对词进度，最终动作仍由导演确认。
 
 因此剧本版本变化可以直接传递给调度 Agent 和导演人工确认环节。版本追踪页面只展示用户自己保存的剧本，不改变任何一个版本的原始内容。
 
@@ -142,7 +142,7 @@ LLM 回答必须引用检索结果中的证据 ID，并通过 Pydantic 校验；
 
 资源管理是独立入口，不要求先解析剧本。`GET/PUT /api/rehearsal/resources/inventory` 用用户隔离的 `data/users/{id}/rehearsal/resources/inventory.json` 保存道具和服装库存；每条记录包含类别、数量、状态、存放位置和备注。库存状态由剧团成员人工确认，Agent 不会把“有库存记录”直接当成“可用”。所有资源写入都会由 Resource Audit Agent 对比写入前后的结构化快照，保存到用户隔离的 `rehearsal/resources/audit.json`。
 
-`GET /api/rehearsal/resources/audit?limit=50` 返回库存、排练室、配乐、预算和发票的最近变更；每条记录会指出新增、修改或删除的资源、变化字段和摘要。审计只记录结构化元数据，不把凭证文件或模型密钥写入记录。
+`GET /api/rehearsal/resources/audit?limit=50` 返回库存、排练室、配乐、预算和发票的最近变更；可以追加 `resource_type`、`change_type` 和 `query` 筛选资源类型、变更动作和资源名称/摘要。每条记录会指出新增、修改或删除的资源、变化字段和摘要。审计只记录结构化元数据，不把凭证文件或模型密钥写入记录。
 
 `POST /api/rehearsal/resources/rooms` 保存排练室预约，并在写入前检查同一房间、同一天的区间是否重叠。边界相接（例如上一场 19:00-20:00，下一场 20:00-21:00）允许；实际重叠返回 `409`，避免把冲突留给排练当天处理。
 
@@ -264,10 +264,10 @@ Suggestion Agent 的第一版只做可解释判断：分类为 `safety`，或内
 - `GET /api/rehearsal/feedback`
 - `GET /api/rehearsal/feedback/metrics?days=30`
 - `GET /api/rehearsal/feedback/{record_id}`
-- `POST /api/rehearsal/scripts/{script_id}/diff`
+- `POST /api/rehearsal/scripts/{script_id}/diff`（资源影响包含匹配的 `resource_audit_matches`）
 - `GET /api/rehearsal/scripts/{script_id}/stage/{scene_id}`
 - `GET/PUT /api/rehearsal/resources/inventory`
-- `GET /api/rehearsal/resources/audit?limit=50`
+- `GET /api/rehearsal/resources/audit?limit=50&resource_type=&change_type=&query=`
 - `GET/POST /api/rehearsal/resources/rooms`
 - `DELETE /api/rehearsal/resources/rooms/{booking_id}`
 - `POST /api/rehearsal/scripts/{script_id}/resources/check`

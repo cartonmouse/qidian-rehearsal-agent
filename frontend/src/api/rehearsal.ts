@@ -185,8 +185,19 @@ export interface VersionDownstreamImpact {
   scene_title: string;
   affected_characters: string[];
   affected_props: string[];
+  resource_audit_matches: VersionResourceAuditMatch[];
   reason: string;
   action: string;
+}
+
+export interface VersionResourceAuditMatch {
+  audit_id: string;
+  resource_type: "inventory" | "room" | "music" | "budget" | "invoice";
+  change_type: "created" | "updated" | "deleted";
+  resource_id: string;
+  label: string;
+  summary: string;
+  created_at: string;
 }
 
 export interface ScriptVersionDiff {
@@ -318,6 +329,13 @@ export interface ResourceAuditRecord {
   changes: ResourceAuditChange[];
   summary: string;
   created_at: string;
+}
+
+export interface ResourceAuditFilters {
+  limit?: number;
+  resourceType?: ResourceAuditRecord["resource_type"];
+  changeType?: ResourceAuditRecord["changes"][number]["change_type"];
+  query?: string;
 }
 
 export interface RoomBooking {
@@ -727,8 +745,16 @@ export async function saveResourceInventory(
   return response.json();
 }
 
-export async function getResourceAudits(limit = 50): Promise<ResourceAuditRecord[]> {
-  const response = await authFetch(`/api/rehearsal/resources/audit?limit=${limit}`);
+export async function getResourceAudits(limitOrFilters: number | ResourceAuditFilters = 50): Promise<ResourceAuditRecord[]> {
+  const filters: ResourceAuditFilters = typeof limitOrFilters === "number"
+    ? { limit: limitOrFilters }
+    : limitOrFilters;
+  const params = new URLSearchParams();
+  params.set("limit", String(filters.limit ?? 50));
+  if (filters.resourceType) params.set("resource_type", filters.resourceType);
+  if (filters.changeType) params.set("change_type", filters.changeType);
+  if (filters.query?.trim()) params.set("query", filters.query.trim());
+  const response = await authFetch(`/api/rehearsal/resources/audit?${params.toString()}`);
   await ensureOk(response, "资源变更记录加载失败");
   return response.json();
 }

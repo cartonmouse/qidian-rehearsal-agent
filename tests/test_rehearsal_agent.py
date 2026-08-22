@@ -48,7 +48,7 @@ from backend.rehearsal.models import (
 )
 from backend.rehearsal.schedule_agent import RehearsalScheduleAgent
 from backend.rehearsal.stage_agent import StageVisualizationAgent
-from backend.rehearsal.version_diff import ScriptVersionDiffAgent
+from backend.rehearsal.version_diff import ScriptVersionDiffAgent, attach_resource_audit_matches
 
 
 def test_script_agent_extracts_scenes_characters_lines_and_props():
@@ -525,6 +525,34 @@ def test_resource_audit_agent_explains_created_updated_and_unchanged_records():
         before=after,
         after=after,
     ) is None
+
+
+def test_version_diff_links_matching_user_resource_audits_to_resource_impacts():
+    parser = ScriptAnalysisAgent()
+    previous = parser.run(
+        title="轨道之外",
+        version_label="v1",
+        script_text="第一场\n小林：我来了。",
+    )
+    current = parser.run(
+        title="轨道之外",
+        version_label="v2",
+        script_text="第一场\n小林：我来了。\n（小林拿起手电筒。）",
+    )
+    diff = ScriptVersionDiffAgent().compare(previous, current)
+    audit = ResourceAuditAgent().compare(
+        resource_type="inventory",
+        operation="replace",
+        before=[],
+        after=[ResourceInventoryItem(resource_id="a" * 32, category="prop", name="手电筒")],
+    )
+
+    assert audit is not None
+    enriched = attach_resource_audit_matches(diff, [audit])
+    resource_impact = next(item for item in enriched.downstream_impacts if item.impact_type == "resource")
+    assert len(resource_impact.resource_audit_matches) == 1
+    assert resource_impact.resource_audit_matches[0].label == "手电筒"
+    assert resource_impact.resource_audit_matches[0].audit_id == audit.audit_id
 
 
 def test_agent_run_metrics_aggregates_status_and_failed_trace_steps():
@@ -1070,10 +1098,20 @@ def test_resource_audit_storage_is_user_scoped_and_keeps_latest_first():
                 before=[],
                 after=[ResourceInventoryItem(resource_id="a" * 32, category="prop", name="椅子")],
             )
+            second_audit = ResourceAuditAgent().compare(
+                resource_type="inventory",
+                operation="replace",
+                before=[],
+                after=[ResourceInventoryItem(resource_id="b" * 32, category="prop", name="手电筒")],
+            )
             assert audit is not None
+            assert second_audit is not None
             save_resource_audit(audit, user_id="actor-a")
+            save_resource_audit(second_audit, user_id="actor-a")
 
-            assert [item.audit_id for item in list_resource_audits(user_id="actor-a")] == [audit.audit_id]
+            assert [item.audit_id for item in list_resource_audits(user_id="actor-a")] == [second_audit.audit_id, audit.audit_id]
+            assert [item.audit_id for item in list_resource_audits(user_id="actor-a", query="手电筒")] == [second_audit.audit_id]
+            assert [item.audit_id for item in list_resource_audits(user_id="actor-a", resource_type="inventory", change_type="created")] == [second_audit.audit_id, audit.audit_id]
             assert list_resource_audits(user_id="actor-b") == []
         finally:
             settings.base_dir = original_base_dir

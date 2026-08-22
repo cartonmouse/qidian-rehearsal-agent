@@ -7,11 +7,13 @@ import re
 
 from backend.rehearsal.models import (
     DialogueLine,
+    ResourceAuditRecord,
     Scene,
     SceneDiff,
     ScriptLineChange,
     ScriptAnalysis,
     ScriptVersionDiff,
+    VersionResourceAuditMatch,
     VersionDownstreamImpact,
 )
 
@@ -321,3 +323,50 @@ class ScriptVersionDiffAgent:
                     )
                 )
         return impacts
+
+
+def attach_resource_audit_matches(
+    diff: ScriptVersionDiff,
+    audits: list[ResourceAuditRecord],
+) -> ScriptVersionDiff:
+    """Attach user-scoped resource evidence to resource downstream impacts."""
+    if not audits:
+        return diff
+
+    enriched: list[VersionDownstreamImpact] = []
+    for impact in diff.downstream_impacts:
+        if impact.impact_type != "resource" or not impact.affected_props:
+            enriched.append(impact)
+            continue
+
+        matches: list[VersionResourceAuditMatch] = []
+        seen: set[tuple[str, str]] = set()
+        for audit in audits:
+            for change in audit.changes:
+                label = _normalize(change.label)
+                related = any(
+                    prop_key == label
+                    or (len(prop_key) >= 2 and prop_key in label)
+                    or (len(label) >= 2 and label in prop_key)
+                    for prop_key in (_normalize(prop) for prop in impact.affected_props)
+                    if prop_key and label
+                )
+                if not related or (audit.audit_id, change.resource_id) in seen:
+                    continue
+                seen.add((audit.audit_id, change.resource_id))
+                matches.append(VersionResourceAuditMatch(
+                    audit_id=audit.audit_id,
+                    resource_type=audit.resource_type,
+                    change_type=change.change_type,
+                    resource_id=change.resource_id,
+                    label=change.label,
+                    summary=change.summary,
+                    created_at=audit.created_at,
+                ))
+                if len(matches) >= 8:
+                    break
+            if len(matches) >= 8:
+                break
+        enriched.append(impact.model_copy(update={"resource_audit_matches": matches}))
+
+    return diff.model_copy(update={"downstream_impacts": enriched})

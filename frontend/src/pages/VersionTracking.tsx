@@ -335,7 +335,12 @@ function DownstreamImpactPanel({
 
         <div className="mt-4 grid gap-3 lg:grid-cols-3">
           {diff.downstream_impacts.map((impact) => (
-            <DownstreamImpactCard key={`${impact.impact_type}-${impact.scene_key}`} impact={impact} onNavigate={onNavigate} />
+            <DownstreamImpactCard
+              key={`${impact.impact_type}-${impact.scene_key}`}
+              impact={impact}
+              scriptId={diff.current_script_id}
+              onNavigate={onNavigate}
+            />
           ))}
         </div>
       </CardContent>
@@ -354,9 +359,11 @@ function ImpactFlag({ icon, label }: { icon: ReactNode; label: string }) {
 
 function DownstreamImpactCard({
   impact,
+  scriptId,
   onNavigate,
 }: {
   impact: VersionDownstreamImpact;
+  scriptId: string;
   onNavigate: (path: string) => void;
 }) {
   const meta = {
@@ -384,6 +391,9 @@ function DownstreamImpactCard({
     medium: "border-orange/25 bg-orange/5",
     info: "border-teal/25 bg-teal/5",
   };
+  const resourceReviewPath = impact.impact_type === "resource"
+    ? `${meta.path}?script_id=${encodeURIComponent(scriptId)}&scene=${encodeURIComponent(impact.scene_title)}&props=${encodeURIComponent(impact.affected_props.join("、"))}${impact.resource_audit_matches[0] ? `&audit_id=${encodeURIComponent(impact.resource_audit_matches[0].audit_id)}` : ""}`
+    : meta.path;
 
   return (
     <article className={cn("rounded-xl border p-3", severityStyles[impact.severity])}>
@@ -403,11 +413,29 @@ function DownstreamImpactCard({
         </div>
       )}
 
+      {impact.impact_type === "resource" && (
+        <div className="mt-3 rounded-lg border border-current/10 bg-card/35 px-2.5 py-2 text-[11px] leading-5">
+          <div className="font-medium text-text">资源审计串联</div>
+          {impact.resource_audit_matches.length > 0 ? (
+            <div className="mt-1 space-y-1 text-dim">
+              <div>已匹配 {impact.resource_audit_matches.length} 条相关资源变更：</div>
+              {impact.resource_audit_matches.slice(0, 3).map((match) => (
+                <div key={`${match.audit_id}-${match.resource_id}`} className="truncate">
+                  · {match.label} · {match.change_type === "created" ? "新增" : match.change_type === "deleted" ? "删除" : "修改"} · {match.summary}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-1 text-dim">尚未匹配到同名的近期资源变更，仍需人工确认库存。</div>
+          )}
+        </div>
+      )}
+
       <div className="mt-3 border-t border-current/10 pt-3 text-xs leading-5">
         <span className="font-medium text-text">建议动作：</span>
         <span className="text-dim">{impact.action}</span>
       </div>
-      <Button type="button" variant="outline" size="sm" className="mt-3 w-full justify-between" onClick={() => onNavigate(meta.path)}>
+      <Button type="button" variant="outline" size="sm" className="mt-3 w-full justify-between" onClick={() => onNavigate(resourceReviewPath)}>
         {meta.button}
         <ArrowRight size={14} />
       </Button>
