@@ -254,11 +254,44 @@ class ResourceInventoryItem(BaseModel):
     status: Literal["available", "maintenance", "missing"] = "available"
     location: str = Field(default="", max_length=200)
     notes: str = Field(default="", max_length=2_000)
+    borrowed_quantity: int = Field(default=0, ge=0, le=10_000)
+    checked_out_to: str = Field(default="", max_length=200)
+    checked_out_scene_id: str | None = Field(default=None, max_length=100)
+    checked_out_scene_label: str = Field(default="", max_length=200)
+    expected_return_date: str | None = Field(default=None, max_length=10)
+    expected_return_time: str | None = Field(default=None, max_length=5)
+    custody_note: str = Field(default="", max_length=2_000)
 
-    @field_validator("name", "location", "notes")
+    @field_validator("name", "location", "notes", "checked_out_to", "checked_out_scene_label", "custody_note")
     @classmethod
     def normalize_text(cls, value: str) -> str:
         return value.strip()
+
+    @field_validator("checked_out_scene_id")
+    @classmethod
+    def normalize_scene_id(cls, value: str | None) -> str | None:
+        return value.strip() if value and value.strip() else None
+
+    @field_validator("expected_return_date")
+    @classmethod
+    def validate_expected_return_date(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            datetime.strptime(value, "%Y-%m-%d")
+        except ValueError as exc:
+            raise ValueError("预计归还日期必须是有效的 YYYY-MM-DD") from exc
+        return value
+
+    @field_validator("expected_return_time")
+    @classmethod
+    def validate_expected_return_time(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        hour, minute = (int(part) for part in value.split(":", 1))
+        if hour > 23 or minute > 59:
+            raise ValueError("预计归还时间必须是有效的 HH:MM")
+        return value
 
     @field_validator("name")
     @classmethod
@@ -267,9 +300,89 @@ class ResourceInventoryItem(BaseModel):
             raise ValueError("资源名称不能为空")
         return value
 
+    @model_validator(mode="after")
+    def validate_custody_state(self):
+        if self.borrowed_quantity > self.quantity:
+            raise ValueError("已借出数量不能超过库存数量")
+        if self.borrowed_quantity > 0 and self.category != "costume":
+            raise ValueError("只有服装支持借还状态")
+        if bool(self.expected_return_date) != bool(self.expected_return_time):
+            raise ValueError("预计归还日期和时间需要同时填写")
+        if self.borrowed_quantity > 0 and not self.checked_out_to:
+            raise ValueError("已借出服装必须记录持有人")
+        return self
+
 
 class ResourceInventoryUpdateRequest(BaseModel):
     items: list[ResourceInventoryItem] = Field(default_factory=list, max_length=1_000)
+
+
+class CostumeCheckoutRequest(BaseModel):
+    """A reviewable checkout action for one costume inventory record."""
+
+    quantity: int = Field(default=1, ge=1, le=10_000)
+    holder: str = Field(min_length=1, max_length=200)
+    scene_id: str | None = Field(default=None, max_length=100)
+    scene_label: str = Field(default="", max_length=200)
+    expected_return_date: str | None = Field(default=None, max_length=10)
+    expected_return_time: str | None = Field(default=None, max_length=5)
+    note: str = Field(default="", max_length=2_000)
+
+    @field_validator("holder", "scene_label", "note")
+    @classmethod
+    def normalize_checkout_text(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("holder")
+    @classmethod
+    def validate_holder(cls, value: str) -> str:
+        if not value:
+            raise ValueError("借出持有人不能为空")
+        return value
+
+    @field_validator("scene_id")
+    @classmethod
+    def normalize_checkout_scene_id(cls, value: str | None) -> str | None:
+        return value.strip() if value and value.strip() else None
+
+    @field_validator("expected_return_date")
+    @classmethod
+    def validate_checkout_date(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            datetime.strptime(value, "%Y-%m-%d")
+        except ValueError as exc:
+            raise ValueError("预计归还日期必须是有效的 YYYY-MM-DD") from exc
+        return value
+
+    @field_validator("expected_return_time")
+    @classmethod
+    def validate_checkout_time(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        hour, minute = (int(part) for part in value.split(":", 1))
+        if hour > 23 or minute > 59:
+            raise ValueError("预计归还时间必须是有效的 HH:MM")
+        return value
+
+    @model_validator(mode="after")
+    def validate_checkout_return_deadline(self):
+        if bool(self.expected_return_date) != bool(self.expected_return_time):
+            raise ValueError("预计归还日期和时间需要同时填写")
+        return self
+
+
+class CostumeReturnRequest(BaseModel):
+    """A partial or complete return action for one costume inventory record."""
+
+    quantity: int | None = Field(default=None, ge=1, le=10_000)
+    note: str = Field(default="", max_length=2_000)
+
+    @field_validator("note")
+    @classmethod
+    def normalize_return_note(cls, value: str) -> str:
+        return value.strip()
 
 
 class ResourceAuditChange(BaseModel):
@@ -283,7 +396,7 @@ class ResourceAuditChange(BaseModel):
 class ResourceAuditRecord(BaseModel):
     audit_id: str
     resource_type: Literal["inventory", "room", "music", "budget", "invoice"]
-    operation: Literal["replace", "create", "delete"]
+    operation: Literal["replace", "create", "delete", "checkout", "return"]
     changed_count: int = Field(ge=0)
     changes: list[ResourceAuditChange] = Field(default_factory=list)
     summary: str
@@ -1129,6 +1242,7 @@ class ScheduleResourceContext(BaseModel):
     invoices: list[InvoiceRecord] = Field(default_factory=list)
     costume_inventory: list[ResourceInventoryItem] = Field(default_factory=list)
     costume_capacities: dict[str, int] = Field(default_factory=dict)
+    costume_borrowed_quantities: dict[str, int] = Field(default_factory=dict)
     costume_changeover_minutes: int = Field(default=10, ge=0, le=120)
     costume_requirements: list[CostumeRequirement] = Field(default_factory=list)
     estimated_total: float = Field(default=0, ge=0)

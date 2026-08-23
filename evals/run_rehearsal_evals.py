@@ -21,6 +21,8 @@ from backend.rehearsal.agent import ScriptAnalysisAgent
 from backend.rehearsal.models import (
     AvailabilitySlot,
     BudgetLineItem,
+    CostumeCheckoutRequest,
+    CostumeReturnRequest,
     InvoiceRecord,
     LineReadingRequest,
     MusicTimelineNote,
@@ -29,7 +31,7 @@ from backend.rehearsal.models import (
     ScriptRagQueryRequest,
 )
 from backend.rehearsal.rag_agent import ScriptRagAgent
-from backend.rehearsal.resource_agent import ResourceAgent
+from backend.rehearsal.resource_agent import CostumeCustodyAgent, ResourceAgent, ResourceAuditAgent
 from backend.rehearsal.schedule_agent import RehearsalScheduleAgent
 from backend.rehearsal.line_reading import LineReadingAgent, LineReadingSessionAgent
 from backend.rehearsal.version_diff import ScriptVersionDiffAgent
@@ -630,6 +632,97 @@ def _evaluate_version_diff(case: dict[str, Any], checks: list[CheckResult]) -> N
         _check(checks, "requires_resource_review", diff.requires_resource_review, expected["requires_resource_review"])
 
 
+def _evaluate_costume_custody(case: dict[str, Any], checks: list[CheckResult]) -> None:
+    inventory = [ResourceInventoryItem(**payload) for payload in case.get("inventory", [])]
+    resource_id = str(case["resource_id"])
+    custody_agent = CostumeCustodyAgent()
+    checkout_request = CostumeCheckoutRequest(**case["checkout"])
+    checked_out = custody_agent.checkout(inventory, resource_id, checkout_request)
+    expected = case["expected"]
+    _check(checks, "checked_out_quantity", checked_out.borrowed_quantity, expected["checked_out_quantity"])
+    _check(checks, "checked_out_holder", checked_out.checked_out_to, expected["checked_out_holder"])
+    _check(checks, "checked_out_scene", checked_out.checked_out_scene_label, expected["checked_out_scene"])
+
+    checkout_audit = ResourceAuditAgent().compare(
+        resource_type="inventory",
+        operation="checkout",
+        before=inventory,
+        after=[checked_out],
+    )
+    _check(checks, "checkout_audit_operation", checkout_audit.operation if checkout_audit else None, "checkout")
+    checkout_fields = checkout_audit.changes[0].changed_fields if checkout_audit else []
+    _check(
+        checks,
+        "checkout_audit_has_quantity",
+        "已借出数量" in checkout_fields,
+        True,
+        passed="已借出数量" in checkout_fields,
+    )
+
+    analysis = _analysis(case).model_copy(update={"review_status": "confirmed"})
+    borrowed_draft = RehearsalScheduleAgent().run(analysis, inventory=[checked_out])
+    borrowed_context = borrowed_draft.resource_context
+    _check(
+        checks,
+        "borrowed_capacity",
+        borrowed_context.costume_capacities if borrowed_context else None,
+        expected["borrowed_capacity"],
+    )
+    _check(
+        checks,
+        "borrowed_snapshot",
+        borrowed_context.costume_borrowed_quantities if borrowed_context else None,
+        expected["borrowed_snapshot"],
+    )
+
+    try:
+        custody_agent.checkout(
+            [checked_out],
+            resource_id,
+            checkout_request.model_copy(update={"holder": str(case["different_holder"])}),
+        )
+    except ValueError as exc:
+        found = str(case["different_holder_error"]) in str(exc)
+        _check(checks, "different_holder_rejected", found, True, passed=found)
+    else:
+        _check(checks, "different_holder_rejected", False, True, passed=False)
+
+    try:
+        custody_agent.return_item(
+            [checked_out],
+            resource_id,
+            CostumeReturnRequest(quantity=int(case["over_return_quantity"])),
+        )
+    except ValueError as exc:
+        found = str(case["over_return_error"]) in str(exc)
+        _check(checks, "over_return_rejected", found, True, passed=found)
+    else:
+        _check(checks, "over_return_rejected", False, True, passed=False)
+
+    returned = custody_agent.return_item(
+        [checked_out],
+        resource_id,
+        CostumeReturnRequest(**case["return"]),
+    )
+    _check(checks, "returned_quantity", returned.borrowed_quantity, expected["returned_quantity"])
+    _check(checks, "returned_holder_cleared", returned.checked_out_to, "")
+    returned_draft = RehearsalScheduleAgent().run(analysis, inventory=[returned])
+    returned_context = returned_draft.resource_context
+    _check(
+        checks,
+        "returned_capacity",
+        returned_context.costume_capacities if returned_context else None,
+        expected["returned_capacity"],
+    )
+    return_audit = ResourceAuditAgent().compare(
+        resource_type="inventory",
+        operation="return",
+        before=[checked_out],
+        after=[returned],
+    )
+    _check(checks, "return_audit_operation", return_audit.operation if return_audit else None, "return")
+
+
 def _run_case(case: dict[str, Any]) -> CaseResult:
     checks: list[CheckResult] = []
     try:
@@ -648,6 +741,8 @@ def _run_case(case: dict[str, Any]) -> CaseResult:
             _evaluate_line_reading_session(case, checks)
         elif kind == "version_diff":
             _evaluate_version_diff(case, checks)
+        elif kind == "costume_custody":
+            _evaluate_costume_custody(case, checks)
         else:
             raise ValueError(f"未知评估类型：{kind}")
     except Exception as exc:  # noqa: BLE001 - a failed case should be visible in the report

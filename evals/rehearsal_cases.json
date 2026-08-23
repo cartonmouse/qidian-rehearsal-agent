@@ -533,5 +533,49 @@
       "resource_affected_costumes": ["黑色西装", "灰色外套"],
       "requires_resource_review": true
     }
+  },
+  {
+    "id": "costume-custody-capacity",
+    "kind": "costume_custody",
+    "title": "服装借还容量",
+    "version_label": "eval-v1",
+    "script_text": "第一场\n（林澄穿灰色外套。）\n林澄：开始。",
+    "analysis_mode": "rules",
+    "resource_id": "costume-custody-eval",
+    "inventory": [
+      {
+        "resource_id": "costume-custody-eval",
+        "category": "costume",
+        "name": "灰色外套",
+        "quantity": 2,
+        "status": "available"
+      }
+    ],
+    "checkout": {
+      "quantity": 1,
+      "holder": "林澄",
+      "scene_id": "scene-1",
+      "scene_label": "第一场",
+      "expected_return_date": "2026-08-26",
+      "expected_return_time": "21:00",
+      "note": "排练前领取"
+    },
+    "return": {
+      "quantity": 1,
+      "note": "归还入柜"
+    },
+    "different_holder": "顾言",
+    "different_holder_error": "持有人为 林澄",
+    "over_return_quantity": 2,
+    "over_return_error": "最多只能归还 1 件",
+    "expected": {
+      "checked_out_quantity": 1,
+      "checked_out_holder": "林澄",
+      "checked_out_scene": "第一场",
+      "borrowed_capacity": {"灰色外套": 1},
+      "borrowed_snapshot": {"灰色外套": 1},
+      "returned_quantity": 0,
+      "returned_capacity": {"灰色外套": 2}
+    }
   }
 ]

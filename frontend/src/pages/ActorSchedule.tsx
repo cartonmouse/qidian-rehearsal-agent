@@ -680,6 +680,10 @@ function ScheduleOverview({
                 <div>{Object.entries(schedule.resource_context.costume_capacities).slice(0, 4).map(([name, capacity]) => `${name} ×${capacity}件`).join("；") || "未登记，按 1 件保守"}</div>
               </div>
               <div>
+                <div className="font-medium text-text">服装借还</div>
+                <div>{Object.entries(schedule.resource_context.costume_borrowed_quantities).slice(0, 4).map(([name, quantity]) => `${name} · 借出 ${quantity} 件`).join("；") || "当前无借出记录"}</div>
+              </div>
+              <div>
                 <div className="font-medium text-text">剧本服装需求</div>
                 <div>{schedule.resource_context.costume_requirements.slice(0, 4).map((item) => `${item.name} · ${item.scene_ids.join("、")}`).join("；") || "无"}{schedule.resource_context.unmatched_costume_requirement_count > 0 && <span className="text-red"> · 未匹配 {schedule.resource_context.unmatched_costume_requirement_count} 项</span>}</div>
               </div>

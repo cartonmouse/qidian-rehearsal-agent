@@ -40,9 +40,10 @@ def _normalize_label(value: str) -> str:
 
 
 def _costume_capacity_snapshot(inventory: list[ResourceInventoryItem]) -> dict[str, int]:
-    """Sum usable costume quantities while keeping unavailable records conservative."""
+    """Sum free costume quantities while keeping unknown inventory conservative."""
     display_names: dict[str, str] = {}
     quantities: defaultdict[str, int] = defaultdict(int)
+    borrowed_quantities: defaultdict[str, int] = defaultdict(int)
     known: list[str] = []
     for item in inventory:
         if item.category != "costume":
@@ -55,10 +56,32 @@ def _costume_capacity_snapshot(inventory: list[ResourceInventoryItem]) -> dict[s
             known.append(key)
         if item.status == "available" and item.quantity > 0:
             quantities[key] += item.quantity
+            borrowed_quantities[key] += min(item.borrowed_quantity, item.quantity)
     return {
-        display_names[key]: max(1, quantities.get(key, 0))
+        display_names[key]: (
+            max(0, quantities.get(key, 0) - borrowed_quantities.get(key, 0))
+            if quantities.get(key, 0) > 0
+            else 0
+            if borrowed_quantities.get(key, 0) > 0
+            else 1
+        )
         for key in known
     }
+
+
+def _costume_borrowed_snapshot(inventory: list[ResourceInventoryItem]) -> dict[str, int]:
+    """Expose active custody counts by display name for Agent explanations."""
+    display_names: dict[str, str] = {}
+    quantities: defaultdict[str, int] = defaultdict(int)
+    for item in inventory:
+        if item.category != "costume" or item.borrowed_quantity <= 0:
+            continue
+        key = _normalize_label(item.name)
+        if not key:
+            continue
+        display_names.setdefault(key, item.name)
+        quantities[key] += item.borrowed_quantity
+    return {display_names[key]: quantities[key] for key in display_names}
 
 
 def _task_resource_requirements(
@@ -66,7 +89,7 @@ def _task_resource_requirements(
     resource_context: ScheduleResourceContext | None,
 ) -> list[tuple[str, str, str, int]]:
     costume_capacities = {
-        _normalize_label(name): max(1, capacity)
+        _normalize_label(name): capacity
         for name, capacity in (resource_context.costume_capacities if resource_context else {}).items()
     }
     requirements = [
@@ -267,6 +290,12 @@ class RehearsalScheduleAgent:
                     name: capacity
                     for name, capacity in (resource_context.costume_capacities if resource_context else {}).items()
                 },
+                "costume_borrowed_quantities": {
+                    name: quantity
+                    for name, quantity in (
+                        resource_context.costume_borrowed_quantities if resource_context else {}
+                    ).items()
+                },
             },
             summary=f"根据演员、道具和服装库存容量划分为 {len(groups)} 个并行组。",
         )
@@ -281,6 +310,7 @@ class RehearsalScheduleAgent:
                     "invoice_count": len(resource_context.invoices),
                     "costume_inventory_count": len(resource_context.costume_inventory),
                     "costume_capacities": resource_context.costume_capacities,
+                    "costume_borrowed_quantities": resource_context.costume_borrowed_quantities,
                     "costume_changeover_minutes": resource_context.costume_changeover_minutes,
                     "costume_requirement_count": len(resource_context.costume_requirements),
                     "estimated_total": resource_context.estimated_total,
@@ -295,6 +325,7 @@ class RehearsalScheduleAgent:
                     "costume_inventory_count": len(resource_context.costume_inventory),
                     "costume_issue_count": resource_context.costume_issue_count,
                     "costume_capacities": resource_context.costume_capacities,
+                    "costume_borrowed_quantities": resource_context.costume_borrowed_quantities,
                     "costume_changeover_minutes": resource_context.costume_changeover_minutes,
                     "costume_requirement_count": len(resource_context.costume_requirements),
                     "unmatched_costume_requirement_count": resource_context.unmatched_costume_requirement_count,
@@ -351,6 +382,7 @@ class RehearsalScheduleAgent:
         invoice_records = list(invoices or [])
         costumes = [item for item in inventory or [] if item.category == "costume"]
         costume_capacities = _costume_capacity_snapshot(costumes)
+        costume_borrowed_quantities = _costume_borrowed_snapshot(costumes)
         requirements = list(costume_requirements or [])
         costume_issues = [
             item for item in costumes
@@ -381,6 +413,14 @@ class RehearsalScheduleAgent:
                 for item in costume_issues
             )
             warnings.append(f"服装库存存在不可直接使用项：{labels}，请人工确认。")
+        if costume_borrowed_quantities:
+            custody_labels = "、".join(
+                f"{item.name}（{item.borrowed_quantity} 件，{item.checked_out_to or '未记录持有人'}"
+                f"{f'，{item.checked_out_scene_label}' if item.checked_out_scene_label else ''}）"
+                for item in costumes
+                if item.borrowed_quantity > 0
+            )
+            warnings.append(f"服装当前借出：{custody_labels}；可用并行容量已扣除借出数量。")
         inventory_names = {_normalize_label(item.name) for item in costumes}
         unmatched_requirements = [
             requirement for requirement in requirements
@@ -398,6 +438,7 @@ class RehearsalScheduleAgent:
             invoices=invoice_records,
             costume_inventory=costumes,
             costume_capacities=costume_capacities,
+            costume_borrowed_quantities=costume_borrowed_quantities,
             costume_changeover_minutes=costume_changeover_minutes,
             costume_requirements=requirements,
             estimated_total=finance.estimated_total,

@@ -22,7 +22,12 @@ from backend.rehearsal.metrics_agent import RehearsalMetricsAgent
 from backend.rehearsal.motto_agent import MottoAgent
 from backend.rehearsal.promo_agent import PromoCopyAgent
 from backend.rehearsal.rag_agent import ScriptRagAgent
-from backend.rehearsal.resource_agent import ResourceAgent, ResourceAuditAgent, room_booking_conflicts
+from backend.rehearsal.resource_agent import (
+    CostumeCustodyAgent,
+    ResourceAgent,
+    ResourceAuditAgent,
+    room_booking_conflicts,
+)
 from backend.rehearsal.run_log import outcome_status, record_agent_run
 from backend.rehearsal.run_metrics import AgentRunMetricsAgent
 from backend.rehearsal.schedule_agent import RehearsalScheduleAgent
@@ -38,6 +43,8 @@ from backend.rehearsal.models import (
     BudgetLineItem,
     BudgetUpdateRequest,
     Character,
+    CostumeCheckoutRequest,
+    CostumeReturnRequest,
     InvoiceRecord,
     InvoiceUpdateRequest,
     MusicTimelineNote,
@@ -143,6 +150,61 @@ def _audit_resource_change(*, user_id: str, resource_type: str, operation: str, 
         save_resource_audit(record, user_id=user_id)
 
 
+_CUSTODY_FIELDS = (
+    "borrowed_quantity",
+    "checked_out_to",
+    "checked_out_scene_id",
+    "checked_out_scene_label",
+    "expected_return_date",
+    "expected_return_time",
+    "custody_note",
+)
+
+
+def _merge_inventory_custody(
+    before: list[ResourceInventoryItem],
+    requested: list[ResourceInventoryItem],
+) -> list[ResourceInventoryItem]:
+    """Keep custody state behind the explicit checkout/return actions."""
+    current_by_id = {item.resource_id: item for item in before}
+    requested_ids = {item.resource_id for item in requested}
+    removed_active = [
+        item.name
+        for item in before
+        if item.borrowed_quantity > 0 and item.resource_id not in requested_ids
+    ]
+    if removed_active:
+        raise HTTPException(409, f"不能移除已借出服装，请先归还：{'、'.join(removed_active)}")
+
+    merged: list[ResourceInventoryItem] = []
+    for item in requested:
+        current = current_by_id.get(item.resource_id)
+        if current and current.borrowed_quantity > 0:
+            if item.category != "costume":
+                raise HTTPException(409, f"服装“{current.name}”仍有借出数量，不能改为道具")
+            if item.quantity < current.borrowed_quantity:
+                raise HTTPException(409, f"库存数量不能低于服装“{current.name}”已借出的 {current.borrowed_quantity} 件")
+            item = item.model_copy(update={field: getattr(current, field) for field in _CUSTODY_FIELDS})
+        elif item.borrowed_quantity > 0 or any(
+            getattr(item, field)
+            for field in _CUSTODY_FIELDS
+            if field != "borrowed_quantity"
+        ):
+            raise HTTPException(409, "借还状态请使用服装借出或归还操作，不要直接修改库存快照")
+        merged.append(item)
+    return merged
+
+
+def _replace_inventory_item(
+    inventory: list[ResourceInventoryItem],
+    updated: ResourceInventoryItem,
+) -> list[ResourceInventoryItem]:
+    return [
+        updated if item.resource_id == updated.resource_id else item
+        for item in inventory
+    ]
+
+
 @router.get("/resources/inventory", response_model=list[ResourceInventoryItem])
 def read_resource_inventory(user_id: str = Depends(get_current_user)):
     """Read the current user's prop and costume inventory."""
@@ -159,15 +221,68 @@ def write_resource_inventory(
     if len(ids) != len(set(ids)):
         raise HTTPException(400, "资源记录 ID 不能重复")
     before = get_inventory(user_id=user_id)
-    save_inventory(request.items, user_id=user_id)
+    merged = _merge_inventory_custody(before, request.items)
+    save_inventory(merged, user_id=user_id)
     _audit_resource_change(
         user_id=user_id,
         resource_type="inventory",
         operation="replace",
         before=before,
-        after=request.items,
+        after=merged,
     )
-    return request.items
+    return merged
+
+
+@router.post("/resources/inventory/{resource_id}/checkout", response_model=ResourceInventoryItem)
+def checkout_costume(
+    resource_id: str,
+    request: CostumeCheckoutRequest,
+    user_id: str = Depends(get_current_user),
+):
+    """Record who holds a costume, for which scene, and when it should return."""
+    before = get_inventory(user_id=user_id)
+    try:
+        updated = CostumeCustodyAgent().checkout(before, resource_id, request)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    after = _replace_inventory_item(before, updated)
+    save_inventory(after, user_id=user_id)
+    _audit_resource_change(
+        user_id=user_id,
+        resource_type="inventory",
+        operation="checkout",
+        before=before,
+        after=after,
+    )
+    return updated
+
+
+@router.post("/resources/inventory/{resource_id}/return", response_model=ResourceInventoryItem)
+def return_costume(
+    resource_id: str,
+    request: CostumeReturnRequest,
+    user_id: str = Depends(get_current_user),
+):
+    """Record a partial or complete costume return and clear custody on completion."""
+    before = get_inventory(user_id=user_id)
+    try:
+        updated = CostumeCustodyAgent().return_item(before, resource_id, request)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    after = _replace_inventory_item(before, updated)
+    save_inventory(after, user_id=user_id)
+    _audit_resource_change(
+        user_id=user_id,
+        resource_type="inventory",
+        operation="return",
+        before=before,
+        after=after,
+    )
+    return updated
 
 
 @router.get("/resources/audit", response_model=list[ResourceAuditRecord])

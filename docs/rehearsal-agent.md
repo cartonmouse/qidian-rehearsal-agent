@@ -150,9 +150,11 @@ LLM 回答必须引用检索结果中的证据 ID，并通过 Pydantic 校验；
 
 ### 资源管理 Resource Agent
 
-资源管理是独立入口，不要求先解析剧本。`GET/PUT /api/rehearsal/resources/inventory` 用用户隔离的 `data/users/{id}/rehearsal/resources/inventory.json` 保存道具和服装库存；每条记录包含类别、数量、状态、存放位置和备注。库存状态由剧团成员人工确认，Agent 不会把“有库存记录”直接当成“可用”。所有资源写入都会由 Resource Audit Agent 对比写入前后的结构化快照，保存到用户隔离的 `rehearsal/resources/audit.json`。
+资源管理是独立入口，不要求先解析剧本。`GET/PUT /api/rehearsal/resources/inventory` 用用户隔离的 `data/users/{id}/rehearsal/resources/inventory.json` 保存道具和服装库存；每条记录包含类别、数量、状态、存放位置、备注，以及服装的已借出数量、持有人、借出场次、预计归还时间和借还备注。库存状态由剧团成员人工确认，Agent 不会把“有库存记录”直接当成“可用”。所有资源写入都会由 Resource Audit Agent 对比写入前后的结构化快照，保存到用户隔离的 `rehearsal/resources/audit.json`。
 
-`GET /api/rehearsal/resources/audit?limit=50` 返回库存、排练室、配乐、预算和发票的最近变更；可以追加 `resource_type`、`change_type` 和 `query` 筛选资源类型、变更动作和资源名称/摘要。每条记录会指出新增、修改或删除的资源、变化字段和摘要。审计只记录结构化元数据，不把凭证文件或模型密钥写入记录。
+服装借还是独立的状态动作：`POST /api/rehearsal/resources/inventory/{resource_id}/checkout` 登记借出数量、持有人、场次和预计归还时间，`POST /api/rehearsal/resources/inventory/{resource_id}/return` 支持部分或全部归还。普通 `PUT` 保存库存不会直接改写借还字段；正在借出的记录不能被删除，也不能把库存数量改到低于已借出数量。每次借出/归还都会生成 `operation=checkout/return` 的库存审计记录，形成“谁在什么时候持有哪件服装”的可回看证据。
+
+`GET /api/rehearsal/resources/audit?limit=50` 返回库存、排练室、配乐、预算和发票的最近变更；可以追加 `resource_type`、`change_type` 和 `query` 筛选资源类型、变更动作和资源名称/摘要。库存借还会额外显示“借出/归还”操作标签，每条记录会指出新增、修改或删除的资源、变化字段和摘要。审计只记录结构化元数据，不把凭证文件或模型密钥写入记录。
 
 `POST /api/rehearsal/resources/rooms` 保存排练室预约，并在写入前检查同一房间、同一天的区间是否重叠。边界相接（例如上一场 19:00-20:00，下一场 20:00-21:00）允许；实际重叠返回 `409`，避免把冲突留给排练当天处理。
 
@@ -249,7 +251,7 @@ Suggestion Agent 的第一版只做可解释判断：分类为 `safety`，或内
 - Explainability：每个调度任务带来源场次、演员、道具、预计时长、并行分组原因和未排班原因；每条复盘保留原始笔记并展示 Agent 的结构化依据。
 - Version evidence：版本差异按场次编号、台词顺序和 `SourceSpan` 对齐，变更可以回指旧行号和新行号；道具/服装变化会成为资源复核影响，并匹配用户级资源审计。
 - Stage evidence：舞台提示和台词事件保留 `source_line`，没有位置证据的角色或道具明确标记为待人工确认。
-- Resource explainability：资源检查保留需求数量、可用数量和“缺失/维修中”的具体原因；排练室预约用后端区间冲突校验保证一致性。
+- Resource explainability：资源检查保留需求数量、可用数量和“缺失/维修中”的具体原因；服装借还通过显式状态动作记录持有人和预计归还，调度快照扣除已借出容量；排练室预约用后端区间冲突校验保证一致性。
 - Finance boundary：预算实际金额、发票金额和核验状态分开保存；财务 Agent 只输出超支/未关联/待核验提醒，不自动确认付款。
 - Logbook evidence：场记保留原始内容和可选 `source_line`，Agent 只做去重和上下文补充，不把推测写回事实记录。
 - Suggestion triage：建议的高优先级只来自明确安全信号和人工选择的安全分类，状态流转与导演回应可追踪，原始意见不被模型改写。

@@ -11,6 +11,8 @@ from uuid import uuid4
 from pydantic import BaseModel
 
 from backend.rehearsal.models import (
+    CostumeCheckoutRequest,
+    CostumeReturnRequest,
     ResourceAuditChange,
     ResourceAuditRecord,
     ResourceCheckResponse,
@@ -22,7 +24,7 @@ from backend.rehearsal.models import (
 )
 
 ResourceAuditType = Literal["inventory", "room", "music", "budget", "invoice"]
-ResourceAuditOperation = Literal["replace", "create", "delete"]
+ResourceAuditOperation = Literal["replace", "create", "delete", "checkout", "return"]
 
 _AUDIT_ID_FIELDS: dict[str, str] = {
     "inventory": "resource_id",
@@ -45,6 +47,13 @@ _AUDIT_FIELD_LABELS = {
     "status": "状态",
     "location": "存放位置",
     "notes": "备注",
+    "borrowed_quantity": "已借出数量",
+    "checked_out_to": "持有人",
+    "checked_out_scene_id": "借出场次 ID",
+    "checked_out_scene_label": "借出场次",
+    "expected_return_date": "预计归还日期",
+    "expected_return_time": "预计归还时间",
+    "custody_note": "借还备注",
     "room_name": "排练室",
     "date": "日期",
     "start": "开始时间",
@@ -168,6 +177,14 @@ class ResourceAgent:
                 warnings.append("已读取剧本服装需求；调度 Agent 会继续按库存容量复核服装并行占用。")
             else:
                 warnings.append("已维护服装库存，但当前剧本没有识别到服装需求；如有换装请在人工确认节点补充。")
+        borrowed_costumes = [item for item in inventory if item.category == "costume" and item.borrowed_quantity > 0]
+        if borrowed_costumes:
+            labels = "、".join(
+                f"{item.name}（{item.borrowed_quantity} 件，{item.checked_out_to or '未记录持有人'}"
+                f"{f'，{item.checked_out_scene_label}' if item.checked_out_scene_label else ''}）"
+                for item in borrowed_costumes
+            )
+            warnings.append(f"服装当前存在借出状态：{labels}；排班容量已扣除借出数量，请核对归还时间。")
         if not inventory_by_name and requirements:
             warnings.append("尚未维护任何道具库存，所有道具都会被标记为缺失。")
         if not scene_id and len(scenes) > 1 and requirements:
@@ -192,6 +209,88 @@ class ResourceAgent:
             summary=summary,
             warnings=warnings,
         )
+
+
+class CostumeCustodyAgent:
+    """Apply deterministic, auditable checkout and return state transitions."""
+
+    def checkout(
+        self,
+        inventory: list[ResourceInventoryItem],
+        resource_id: str,
+        request: CostumeCheckoutRequest,
+    ) -> ResourceInventoryItem:
+        item = self._find(inventory, resource_id)
+        if item.category != "costume":
+            raise ValueError("只有服装库存支持借出")
+        if item.status != "available":
+            raise ValueError(f"服装“{item.name}”当前状态为 {item.status}，不能借出")
+        available_quantity = item.quantity - item.borrowed_quantity
+        if request.quantity > available_quantity:
+            raise ValueError(f"服装“{item.name}”可借出数量仅剩 {available_quantity} 件")
+
+        if item.borrowed_quantity > 0:
+            if self._normalize(item.checked_out_to) != self._normalize(request.holder):
+                raise ValueError(f"服装“{item.name}”已有借出记录，持有人为 {item.checked_out_to}")
+            if item.checked_out_scene_id and request.scene_id and item.checked_out_scene_id != request.scene_id:
+                raise ValueError(f"服装“{item.name}”已有借出场次，不能同时登记给不同场次")
+            if (
+                item.checked_out_scene_label
+                and request.scene_label
+                and self._normalize(item.checked_out_scene_label) != self._normalize(request.scene_label)
+            ):
+                raise ValueError(f"服装“{item.name}”已有借出场次，不能同时登记给不同场次")
+
+        return item.model_copy(update={
+            "borrowed_quantity": item.borrowed_quantity + request.quantity,
+            "checked_out_to": request.holder,
+            "checked_out_scene_id": request.scene_id or item.checked_out_scene_id,
+            "checked_out_scene_label": request.scene_label or item.checked_out_scene_label,
+            "expected_return_date": request.expected_return_date or item.expected_return_date,
+            "expected_return_time": request.expected_return_time or item.expected_return_time,
+            "custody_note": request.note or item.custody_note,
+        })
+
+    def return_item(
+        self,
+        inventory: list[ResourceInventoryItem],
+        resource_id: str,
+        request: CostumeReturnRequest,
+    ) -> ResourceInventoryItem:
+        item = self._find(inventory, resource_id)
+        if item.category != "costume":
+            raise ValueError("只有服装库存支持归还")
+        if item.borrowed_quantity <= 0:
+            raise ValueError(f"服装“{item.name}”当前没有借出数量")
+        return_quantity = request.quantity or item.borrowed_quantity
+        if return_quantity > item.borrowed_quantity:
+            raise ValueError(f"服装“{item.name}”最多只能归还 {item.borrowed_quantity} 件")
+
+        remaining = item.borrowed_quantity - return_quantity
+        update = {"borrowed_quantity": remaining}
+        if request.note:
+            update["custody_note"] = request.note
+        if remaining == 0:
+            update.update({
+                "checked_out_to": "",
+                "checked_out_scene_id": None,
+                "checked_out_scene_label": "",
+                "expected_return_date": None,
+                "expected_return_time": None,
+                "custody_note": request.note,
+            })
+        return item.model_copy(update=update)
+
+    @staticmethod
+    def _find(inventory: list[ResourceInventoryItem], resource_id: str) -> ResourceInventoryItem:
+        item = next((candidate for candidate in inventory if candidate.resource_id == resource_id), None)
+        if item is None:
+            raise LookupError("库存记录不存在")
+        return item
+
+    @staticmethod
+    def _normalize(value: str) -> str:
+        return re.sub(r"\s+", "", value).casefold()
 
 
 class ResourceAuditAgent:
@@ -266,13 +365,15 @@ class ResourceAuditAgent:
             "budget": "预算",
             "invoice": "发票",
         }[resource_type]
+        operation_label = {"checkout": "借出", "return": "归还"}.get(operation)
+        summary_prefix = f"{resource_label}{operation_label}" if operation_label else f"{resource_label}变更"
         return ResourceAuditRecord(
             audit_id=uuid4().hex,
             resource_type=resource_type,
             operation=operation,
             changed_count=len(changes),
             changes=changes,
-            summary=f"{resource_label}变更：" + "、".join(summary_parts) + "。",
+            summary=f"{summary_prefix}：" + "、".join(summary_parts) + "。",
             created_at=datetime.now(timezone.utc).isoformat(),
         )
 

@@ -17,7 +17,7 @@ from backend.rehearsal.metrics_agent import RehearsalMetricsAgent
 from backend.rehearsal.motto_agent import MottoAgent
 from backend.rehearsal.promo_agent import PromoCopyAgent
 from backend.rehearsal.rag_agent import ScriptRagAgent
-from backend.rehearsal.resource_agent import ResourceAgent, ResourceAuditAgent, room_booking_conflicts
+from backend.rehearsal.resource_agent import CostumeCustodyAgent, ResourceAgent, ResourceAuditAgent, room_booking_conflicts
 from backend.rehearsal.run_log import outcome_status, record_agent_run
 from backend.rehearsal.run_metrics import AgentRunMetricsAgent
 from backend.rehearsal.storage import get_agent_run, list_agent_runs, list_resource_audits, save_resource_audit
@@ -27,6 +27,8 @@ from backend.rehearsal.models import (
     AgentRunRecord,
     AgentStep,
     BudgetLineItem,
+    CostumeCheckoutRequest,
+    CostumeReturnRequest,
     InvoiceRecord,
     LineReadingRequest,
     MottoRequest,
@@ -36,6 +38,7 @@ from backend.rehearsal.models import (
     RehearsalFeedbackRequest,
     RehearsalLogRequest,
     ResourceInventoryItem,
+    ResourceInventoryUpdateRequest,
     ResourceAuditRecord,
     MusicTimelineNote,
     RoomBooking,
@@ -609,6 +612,7 @@ def test_schedule_agent_captures_music_and_budget_context():
         "costume_inventory_count": 2,
         "costume_issue_count": 2,
         "costume_capacities": {"灰色外套": 1, "红色围巾": 1},
+        "costume_borrowed_quantities": {},
         "costume_changeover_minutes": 10,
         "costume_requirement_count": 1,
         "unmatched_costume_requirement_count": 0,
@@ -1249,6 +1253,168 @@ def test_resource_agent_explains_costume_handoff_to_schedule_agent():
 
     assert any("调度 Agent" in warning for warning in result.warnings)
     assert not any("尚未从剧本文本自动抽取" in warning for warning in result.warnings)
+
+
+def test_costume_custody_agent_tracks_partial_return_and_rejects_boundaries():
+    inventory = [ResourceInventoryItem(
+        resource_id="costume-custody",
+        category="costume",
+        name="灰色外套",
+        quantity=2,
+        status="available",
+    )]
+    agent = CostumeCustodyAgent()
+    request = CostumeCheckoutRequest(
+        quantity=1,
+        holder="林澄",
+        scene_id="scene-1",
+        scene_label="第一场",
+        expected_return_date="2026-08-26",
+        expected_return_time="21:00",
+        note="排练前领取",
+    )
+
+    checked_out = agent.checkout(inventory, "costume-custody", request)
+    assert checked_out.borrowed_quantity == 1
+    assert checked_out.checked_out_to == "林澄"
+    assert checked_out.checked_out_scene_label == "第一场"
+    assert checked_out.expected_return_date == "2026-08-26"
+
+    checked_out_twice = agent.checkout(
+        [checked_out],
+        "costume-custody",
+        request.model_copy(update={"quantity": 1}),
+    )
+    assert checked_out_twice.borrowed_quantity == 2
+
+    try:
+        agent.checkout(
+            [checked_out],
+            "costume-custody",
+            request.model_copy(update={"holder": "顾言"}),
+        )
+    except ValueError as exc:
+        assert "持有人为 林澄" in str(exc)
+    else:
+        raise AssertionError("不同持有人不应覆盖现有借出记录")
+
+    returned_part = agent.return_item(
+        [checked_out_twice],
+        "costume-custody",
+        CostumeReturnRequest(quantity=1, note="先归还一件"),
+    )
+    assert returned_part.borrowed_quantity == 1
+    assert returned_part.checked_out_to == "林澄"
+    returned_all = agent.return_item(
+        [returned_part],
+        "costume-custody",
+        CostumeReturnRequest(quantity=1, note="全部归还入柜"),
+    )
+    assert returned_all.borrowed_quantity == 0
+    assert returned_all.checked_out_to == ""
+    assert returned_all.expected_return_date is None
+    try:
+        agent.return_item([returned_all], "costume-custody", CostumeReturnRequest())
+    except ValueError as exc:
+        assert "没有借出数量" in str(exc)
+    else:
+        raise AssertionError("没有借出数量时不应允许归还")
+
+    checkout_audit = ResourceAuditAgent().compare(
+        resource_type="inventory",
+        operation="checkout",
+        before=inventory,
+        after=[checked_out],
+    )
+    assert checkout_audit is not None
+    assert checkout_audit.operation == "checkout"
+    assert checkout_audit.summary == "库存借出：修改 1 条。"
+    assert "已借出数量" in checkout_audit.changes[0].changed_fields
+
+
+def test_schedule_agent_deducts_borrowed_costume_capacity_and_explains_it():
+    analysis = ScriptAnalysisAgent().run(
+        title="服装借还容量",
+        version_label="v1",
+        script_text="第一场\n（林澄穿灰色外套。）\n林澄：开始。",
+        script_id="costume-borrowed-capacity",
+        analysis_mode="rules",
+    ).model_copy(update={"review_status": "confirmed"})
+    inventory = [ResourceInventoryItem(
+        resource_id="borrowed-capacity",
+        category="costume",
+        name="灰色外套",
+        quantity=2,
+        status="available",
+        borrowed_quantity=1,
+        checked_out_to="顾言",
+        checked_out_scene_label="第二场",
+    )]
+
+    draft = RehearsalScheduleAgent().run(analysis, inventory=inventory)
+
+    assert draft.resource_context is not None
+    assert draft.resource_context.costume_capacities == {"灰色外套": 1}
+    assert draft.resource_context.costume_borrowed_quantities == {"灰色外套": 1}
+    assert any("借出" in warning and "顾言" in warning for warning in draft.resource_context.warnings)
+    group_call = next(call for call in draft.tool_calls if call.tool_name == "group_parallel_tasks")
+    assert group_call.result["costume_borrowed_quantities"] == {"灰色外套": 1}
+    inspect_call = next(call for call in draft.tool_calls if call.tool_name == "inspect_rehearsal_resources")
+    assert inspect_call.result["costume_borrowed_quantities"] == {"灰色外套": 1}
+
+
+def test_inventory_routes_keep_custody_actions_user_scoped_and_protect_put_updates():
+    try:
+        from backend.routers.rehearsal import checkout_costume, return_costume, write_resource_inventory
+    except ModuleNotFoundError as exc:
+        if exc.name == "jose":
+            return
+        raise
+
+    inventory = [ResourceInventoryItem(
+        resource_id="route-custody",
+        category="costume",
+        name="灰色外套",
+        quantity=2,
+        status="available",
+    )]
+    checkout_request = CostumeCheckoutRequest(quantity=1, holder="林澄", scene_label="第一场")
+
+    with patch("backend.routers.rehearsal.get_inventory", return_value=inventory), \
+        patch("backend.routers.rehearsal.save_inventory") as save_inventory, \
+        patch("backend.routers.rehearsal._audit_resource_change") as audit:
+        checked_out = checkout_costume("route-custody", checkout_request, user_id="route-user")
+
+    assert checked_out.borrowed_quantity == 1
+    save_inventory.assert_called_once()
+    audit.assert_called_once()
+    assert audit.call_args.kwargs["operation"] == "checkout"
+
+    stale_client_snapshot = checked_out.model_copy(update={"borrowed_quantity": 0, "checked_out_to": ""})
+    with patch("backend.routers.rehearsal.get_inventory", return_value=[checked_out]), \
+        patch("backend.routers.rehearsal.save_inventory") as save_inventory, \
+        patch("backend.routers.rehearsal._audit_resource_change"):
+        preserved = write_resource_inventory(
+            ResourceInventoryUpdateRequest(items=[stale_client_snapshot]),
+            user_id="route-user",
+        )
+
+    assert preserved[0].borrowed_quantity == 1
+    assert preserved[0].checked_out_to == "林澄"
+    save_inventory.assert_called_once()
+
+    with patch("backend.routers.rehearsal.get_inventory", return_value=[checked_out]), \
+        patch("backend.routers.rehearsal.save_inventory") as save_inventory, \
+        patch("backend.routers.rehearsal._audit_resource_change") as audit:
+        returned = return_costume(
+            "route-custody",
+            CostumeReturnRequest(quantity=1, note="归还"),
+            user_id="route-user",
+        )
+
+    assert returned.borrowed_quantity == 0
+    assert returned.checked_out_to == ""
+    assert audit.call_args.kwargs["operation"] == "return"
 
 
 def test_resource_audit_agent_explains_created_updated_and_unchanged_records():
@@ -1924,6 +2090,6 @@ def test_rehearsal_agent_eval_set_is_reproducible_without_provider_keys():
 
     report = evaluate_cases()
 
-    assert report["total"] == 15
+    assert report["total"] == 16
     assert report["failed"] == 0
     assert report["pass_rate"] == 100.0

@@ -18,6 +18,7 @@ import {
 
 import {
   checkScriptResources,
+  checkoutCostume,
   createRoomBooking,
   deleteRoomBooking,
   getResourceInventory,
@@ -26,6 +27,7 @@ import {
   getScript,
   getScripts,
   saveResourceInventory,
+  returnCostume,
   type ResourceCheckResponse,
   type ResourceAuditRecord,
   type ResourceInventoryItem,
@@ -63,6 +65,13 @@ function createEmptyInventoryItem(): ResourceInventoryItem {
     status: "available",
     location: "",
     notes: "",
+    borrowed_quantity: 0,
+    checked_out_to: "",
+    checked_out_scene_id: null,
+    checked_out_scene_label: "",
+    expected_return_date: null,
+    expected_return_time: null,
+    custody_note: "",
   };
 }
 
@@ -304,6 +313,14 @@ export default function ResourceManagement() {
         />
       </div>
 
+      <CostumeCustodyCard
+        inventory={inventory}
+        onUpdated={(updated) => setInventory((items) => items.map((item) => (
+          item.resource_id === updated.resource_id ? updated : item
+        )))}
+        onRefreshAudits={refreshAudits}
+      />
+
       <ResourceCheckCard
         scripts={scripts}
         analysis={analysis}
@@ -455,8 +472,189 @@ function InventoryCard({
                     />
                   </Field>
                 </div>
+                {item.category === "costume" && (
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-primary/15 bg-primary/5 px-2.5 py-2 text-[11px] leading-5 text-dim">
+                    <span className="font-medium text-text">借还状态</span>
+                    {item.borrowed_quantity > 0
+                      ? <span>{item.borrowed_quantity}/{item.quantity} 件借出 · {item.checked_out_to || "未记录持有人"}{item.checked_out_scene_label ? ` · ${item.checked_out_scene_label}` : ""}</span>
+                      : <span>全部在库</span>}
+                    {item.expected_return_date && item.expected_return_time && <span>预计 {item.expected_return_date} {item.expected_return_time}</span>}
+                  </div>
+                )}
               </div>
             ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function CostumeCustodyCard({
+  inventory,
+  onUpdated,
+  onRefreshAudits,
+}: {
+  inventory: ResourceInventoryItem[];
+  onUpdated: (item: ResourceInventoryItem) => void;
+  onRefreshAudits: () => Promise<void>;
+}) {
+  const costumes = useMemo(() => inventory.filter((item) => item.category === "costume"), [inventory]);
+  const [resourceId, setResourceId] = useState("");
+  const [form, setForm] = useState({
+    quantity: 1,
+    holder: "",
+    scene_label: "",
+    expected_return_date: "",
+    expected_return_time: "",
+    note: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const selected = costumes.find((item) => item.resource_id === resourceId) || costumes[0] || null;
+
+  useEffect(() => {
+    if (!selected) {
+      if (resourceId) setResourceId("");
+      return;
+    }
+    if (selected.resource_id !== resourceId) setResourceId(selected.resource_id);
+  }, [resourceId, selected]);
+
+  function selectCostume(nextResourceId: string) {
+    setResourceId(nextResourceId);
+    setForm({
+      quantity: 1,
+      holder: "",
+      scene_label: "",
+      expected_return_date: "",
+      expected_return_time: "",
+      note: "",
+    });
+    setError("");
+    setMessage("");
+  }
+
+  async function handleCheckout() {
+    if (!selected) return;
+    if (!form.holder.trim()) {
+      setError("请填写服装持有人。");
+      return;
+    }
+    if ((form.expected_return_date && !form.expected_return_time) || (!form.expected_return_date && form.expected_return_time)) {
+      setError("预计归还日期和时间需要同时填写。");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    setMessage("");
+    try {
+      const updated = await checkoutCostume(selected.resource_id, {
+        quantity: Math.max(1, form.quantity),
+        holder: form.holder.trim(),
+        scene_label: form.scene_label.trim(),
+        expected_return_date: form.expected_return_date || null,
+        expected_return_time: form.expected_return_time || null,
+        note: form.note.trim(),
+      });
+      onUpdated(updated);
+      await onRefreshAudits();
+      setMessage(`已登记借出 ${updated.name} ${form.quantity} 件。`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "服装借出登记失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleReturn() {
+    if (!selected || selected.borrowed_quantity <= 0) return;
+    setSaving(true);
+    setError("");
+    setMessage("");
+    try {
+      const updated = await returnCostume(selected.resource_id, {
+        quantity: selected.borrowed_quantity,
+        note: form.note.trim(),
+      });
+      onUpdated(updated);
+      await onRefreshAudits();
+      setMessage(`已登记归还 ${updated.name}，当前全部在库。`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "服装归还登记失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const availableQuantity = selected ? Math.max(0, selected.quantity - selected.borrowed_quantity) : 0;
+
+  return (
+    <Card>
+      <CardContent className="p-4 md:p-5">
+        <div className="flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold"><Wrench size={16} className="text-primary" />服装借还登记</div>
+            <p className="mt-1 text-xs leading-5 text-dim">借还动作会写入资源审计；排班 Agent 会从服装并行容量中扣除当前借出数量。</p>
+          </div>
+          <span className="rounded-full border border-primary/20 bg-primary/8 px-2 py-1 text-[10px] text-primary">Costume Custody Agent</span>
+        </div>
+
+        {costumes.length === 0 ? (
+          <div className="mt-4 rounded-xl border border-dashed border-border bg-background/35 px-4 py-6 text-center text-sm text-dim">先在上方新增并保存一条服装库存记录，再登记借还。</div>
+        ) : (
+          <div className="mt-4 space-y-3">
+            <div className="grid gap-3 md:grid-cols-[minmax(220px,1fr)_auto_auto] md:items-end">
+              <Field label="服装记录">
+                <select value={selected?.resource_id || ""} onChange={(event) => selectCostume(event.target.value)} className={INPUT_CLASS}>
+                  {costumes.map((item) => <option key={item.resource_id} value={item.resource_id}>{item.name} · {item.quantity} 件</option>)}
+                </select>
+              </Field>
+              <div className="rounded-lg border border-border bg-background/35 px-3 py-2 text-xs text-dim">可借 {availableQuantity} 件</div>
+              <div className="rounded-lg border border-border bg-background/35 px-3 py-2 text-xs text-dim">已借 {selected?.borrowed_quantity || 0} 件</div>
+            </div>
+
+            <div className="rounded-xl border border-border bg-background/30 p-3">
+              <div className="grid gap-3 md:grid-cols-[0.65fr_1fr_1fr_1fr]">
+                <Field label="借出数量">
+                  <input type="number" min={1} max={Math.max(1, availableQuantity)} value={form.quantity} onChange={(event) => setForm((current) => ({ ...current, quantity: Math.max(1, Number(event.target.value) || 1) }))} className={INPUT_CLASS} disabled={availableQuantity === 0 || saving} />
+                </Field>
+                <Field label="持有人">
+                  <input value={form.holder} onChange={(event) => setForm((current) => ({ ...current, holder: event.target.value }))} className={INPUT_CLASS} placeholder="例如：林澄" disabled={saving} />
+                </Field>
+                <Field label="场次 / 用途">
+                  <input value={form.scene_label} onChange={(event) => setForm((current) => ({ ...current, scene_label: event.target.value }))} className={INPUT_CLASS} placeholder="例如：第二场" disabled={saving} />
+                </Field>
+                <Field label="预计归还日期">
+                  <input type="date" value={form.expected_return_date} onChange={(event) => setForm((current) => ({ ...current, expected_return_date: event.target.value }))} className={INPUT_CLASS} disabled={saving} />
+                </Field>
+              </div>
+              <div className="mt-3 grid gap-3 md:grid-cols-[0.65fr_1fr_1fr_auto] md:items-end">
+                <Field label="预计归还时间">
+                  <input type="time" value={form.expected_return_time} onChange={(event) => setForm((current) => ({ ...current, expected_return_time: event.target.value }))} className={INPUT_CLASS} disabled={saving} />
+                </Field>
+                <Field label="借还备注">
+                  <input value={form.note} onChange={(event) => setForm((current) => ({ ...current, note: event.target.value }))} className={INPUT_CLASS} placeholder="例如：演出后交回服装柜" disabled={saving} />
+                </Field>
+                <div className="text-xs leading-5 text-dim md:col-span-1">{selected?.borrowed_quantity ? `当前持有人：${selected.checked_out_to || "未记录"}${selected.checked_out_scene_label ? ` · ${selected.checked_out_scene_label}` : ""}` : "登记后会在调度快照中扣除可用容量。"}</div>
+                <div className="flex gap-2 md:justify-end">
+                  <Button type="button" size="sm" onClick={() => void handleCheckout()} disabled={saving || availableQuantity === 0}>
+                    {saving ? <Loader2 className="animate-spin" /> : <Archive size={14} />}
+                    登记借出
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => void handleReturn()} disabled={saving || !selected?.borrowed_quantity}>
+                    归还全部
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {(error || message) && (
+          <div className={cn("mt-3 rounded-lg border px-3 py-2 text-xs", error ? "border-red/25 bg-red/8 text-red" : "border-green/25 bg-green/8 text-green")}>
+            {error || message}
           </div>
         )}
       </CardContent>
@@ -662,6 +860,14 @@ const AUDIT_CHANGE_LABELS: Record<ResourceAuditRecord["changes"][number]["change
   deleted: "删除",
 };
 
+const AUDIT_OPERATION_LABELS: Record<ResourceAuditRecord["operation"], string> = {
+  replace: "变更",
+  create: "新增",
+  delete: "删除",
+  checkout: "借出",
+  return: "归还",
+};
+
 function ResourceAuditCard({
   audits,
   focusedAuditId,
@@ -696,7 +902,7 @@ function ResourceAuditCard({
         <div className="flex items-start justify-between gap-3 border-b border-border pb-4">
           <div>
             <div className="flex items-center gap-2 text-sm font-semibold text-text"><History size={16} className="text-primary" />资源变更记录</div>
-            <p className="mt-1 text-xs leading-5 text-dim">保留库存、排练室、配乐、预算和发票的最近变更，方便解释 Resource Agent 使用了哪一版人工确认数据。</p>
+            <p className="mt-1 text-xs leading-5 text-dim">保留库存借还、排练室、配乐、预算和发票的最近变更，方便解释 Resource Agent 使用了哪一版人工确认数据。</p>
           </div>
           <span className="rounded-full border border-primary/20 bg-primary/8 px-2 py-1 text-[10px] text-primary">{visibleAudits.length}/{audits.length} 条</span>
         </div>
@@ -751,6 +957,7 @@ function ResourceAuditCard({
                 <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-2 text-sm font-medium text-text">
                     <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary">{AUDIT_RESOURCE_LABELS[audit.resource_type]}</span>
+                    <span className="rounded-full bg-orange/10 px-2 py-0.5 text-[10px] text-orange">{AUDIT_OPERATION_LABELS[audit.operation]}</span>
                     {audit.summary}
                   </div>
                   <span className="text-[11px] text-dim">{new Date(audit.created_at).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>

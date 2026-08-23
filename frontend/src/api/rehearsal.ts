@@ -359,6 +359,7 @@ export interface ScheduleResourceContext {
   invoices: InvoiceRecord[];
   costume_inventory: ResourceInventoryItem[];
   costume_capacities: Record<string, number>;
+  costume_borrowed_quantities: Record<string, number>;
   costume_changeover_minutes: number;
   costume_requirements: CostumeRequirement[];
   estimated_total: number;
@@ -394,6 +395,28 @@ export interface ResourceInventoryItem {
   status: "available" | "maintenance" | "missing";
   location: string;
   notes: string;
+  borrowed_quantity: number;
+  checked_out_to: string;
+  checked_out_scene_id: string | null;
+  checked_out_scene_label: string;
+  expected_return_date: string | null;
+  expected_return_time: string | null;
+  custody_note: string;
+}
+
+export interface CostumeCheckoutRequest {
+  quantity: number;
+  holder: string;
+  scene_id?: string | null;
+  scene_label?: string;
+  expected_return_date?: string | null;
+  expected_return_time?: string | null;
+  note?: string;
+}
+
+export interface CostumeReturnRequest {
+  quantity?: number | null;
+  note?: string;
 }
 
 export interface ResourceAuditChange {
@@ -407,7 +430,7 @@ export interface ResourceAuditChange {
 export interface ResourceAuditRecord {
   audit_id: string;
   resource_type: "inventory" | "room" | "music" | "budget" | "invoice";
-  operation: "replace" | "create" | "delete";
+  operation: "replace" | "create" | "delete" | "checkout" | "return";
   changed_count: number;
   changes: ResourceAuditChange[];
   summary: string;
@@ -889,6 +912,32 @@ export async function saveResourceInventory(
     body: JSON.stringify({ items }),
   });
   await ensureOk(response, "资源库存保存失败");
+  return response.json();
+}
+
+export async function checkoutCostume(
+  resourceId: string,
+  payload: CostumeCheckoutRequest,
+): Promise<ResourceInventoryItem> {
+  const response = await authFetch(`/api/rehearsal/resources/inventory/${resourceId}/checkout`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  await ensureOk(response, "服装借出登记失败");
+  return response.json();
+}
+
+export async function returnCostume(
+  resourceId: string,
+  payload: CostumeReturnRequest = {},
+): Promise<ResourceInventoryItem> {
+  const response = await authFetch(`/api/rehearsal/resources/inventory/${resourceId}/return`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  await ensureOk(response, "服装归还登记失败");
   return response.json();
 }
 
