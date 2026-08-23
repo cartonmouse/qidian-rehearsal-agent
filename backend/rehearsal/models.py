@@ -244,6 +244,56 @@ class AvailabilityUpdateRequest(BaseModel):
     slots: list[AvailabilitySlot] = Field(default_factory=list, max_length=500)
 
 
+class CostumeCustodyRecord(BaseModel):
+    """One holder's allocation inside a costume inventory record."""
+
+    custody_id: str = Field(default_factory=lambda: uuid4().hex, min_length=1, max_length=64)
+    quantity: int = Field(ge=1, le=10_000)
+    holder: str = Field(min_length=1, max_length=200)
+    scene_id: str | None = Field(default=None, max_length=100)
+    scene_label: str = Field(default="", max_length=200)
+    expected_return_date: str | None = Field(default=None, max_length=10)
+    expected_return_time: str | None = Field(default=None, max_length=5)
+    note: str = Field(default="", max_length=2_000)
+
+    @field_validator("holder", "scene_label", "note")
+    @classmethod
+    def normalize_custody_text(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("scene_id")
+    @classmethod
+    def normalize_custody_scene_id(cls, value: str | None) -> str | None:
+        return value.strip() if value and value.strip() else None
+
+    @field_validator("expected_return_date")
+    @classmethod
+    def validate_custody_date(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            datetime.strptime(value, "%Y-%m-%d")
+        except ValueError as exc:
+            raise ValueError("预计归还日期必须是有效的 YYYY-MM-DD") from exc
+        return value
+
+    @field_validator("expected_return_time")
+    @classmethod
+    def validate_custody_time(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        hour, minute = (int(part) for part in value.split(":", 1))
+        if hour > 23 or minute > 59:
+            raise ValueError("预计归还时间必须是有效的 HH:MM")
+        return value
+
+    @model_validator(mode="after")
+    def validate_custody_deadline(self):
+        if bool(self.expected_return_date) != bool(self.expected_return_time):
+            raise ValueError("预计归还日期和时间需要同时填写")
+        return self
+
+
 class ResourceInventoryItem(BaseModel):
     """A user-maintained prop or costume inventory record."""
 
@@ -261,6 +311,7 @@ class ResourceInventoryItem(BaseModel):
     expected_return_date: str | None = Field(default=None, max_length=10)
     expected_return_time: str | None = Field(default=None, max_length=5)
     custody_note: str = Field(default="", max_length=2_000)
+    custody_records: list[CostumeCustodyRecord] = Field(default_factory=list, max_length=100)
 
     @field_validator("name", "location", "notes", "checked_out_to", "checked_out_scene_label", "custody_note")
     @classmethod
@@ -310,6 +361,15 @@ class ResourceInventoryItem(BaseModel):
             raise ValueError("预计归还日期和时间需要同时填写")
         if self.borrowed_quantity > 0 and not self.checked_out_to:
             raise ValueError("已借出服装必须记录持有人")
+        if self.custody_records:
+            record_ids = [record.custody_id for record in self.custody_records]
+            if len(record_ids) != len(set(record_ids)):
+                raise ValueError("服装借用记录 ID 不能重复")
+            record_total = sum(record.quantity for record in self.custody_records)
+            if record_total != self.borrowed_quantity:
+                raise ValueError("服装借用记录数量必须等于已借出数量")
+            if self.category != "costume":
+                raise ValueError("只有服装支持多人借用记录")
         return self
 
 
@@ -377,12 +437,13 @@ class CostumeReturnRequest(BaseModel):
     """A partial or complete return action for one costume inventory record."""
 
     quantity: int | None = Field(default=None, ge=1, le=10_000)
+    custody_id: str | None = Field(default=None, max_length=64)
     note: str = Field(default="", max_length=2_000)
 
-    @field_validator("note")
+    @field_validator("custody_id", "note")
     @classmethod
     def normalize_return_note(cls, value: str) -> str:
-        return value.strip()
+        return value.strip() if value else value
 
 
 class CostumeCustodyAlert(BaseModel):
@@ -396,6 +457,8 @@ class CostumeCustodyAlert(BaseModel):
     holder: str
     expected_return_at: str | None = None
     message: str
+    custody_id: str = ""
+    scene_label: str = ""
 
 
 class ResourceAuditChange(BaseModel):

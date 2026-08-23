@@ -159,6 +159,7 @@ _CUSTODY_FIELDS = (
     "expected_return_date",
     "expected_return_time",
     "custody_note",
+    "custody_records",
 )
 
 

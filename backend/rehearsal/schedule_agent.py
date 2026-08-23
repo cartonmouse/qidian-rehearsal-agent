@@ -39,6 +39,16 @@ def _normalize_label(value: str) -> str:
     return "".join(value.strip().casefold().split())
 
 
+def _costume_custody_summary(item: ResourceInventoryItem) -> str:
+    if item.custody_records:
+        return "、".join(
+            f"{record.holder} {record.quantity} 件"
+            f"{f'（{record.scene_label}）' if record.scene_label else ''}"
+            for record in item.custody_records
+        )
+    return item.checked_out_to or "未记录持有人"
+
+
 def _costume_capacity_snapshot(inventory: list[ResourceInventoryItem]) -> dict[str, int]:
     """Sum free costume quantities while keeping unknown inventory conservative."""
     display_names: dict[str, str] = {}
@@ -415,8 +425,7 @@ class RehearsalScheduleAgent:
             warnings.append(f"服装库存存在不可直接使用项：{labels}，请人工确认。")
         if costume_borrowed_quantities:
             custody_labels = "、".join(
-                f"{item.name}（{item.borrowed_quantity} 件，{item.checked_out_to or '未记录持有人'}"
-                f"{f'，{item.checked_out_scene_label}' if item.checked_out_scene_label else ''}）"
+                f"{item.name}（{item.borrowed_quantity} 件，{_costume_custody_summary(item)}）"
                 for item in costumes
                 if item.borrowed_quantity > 0
             )

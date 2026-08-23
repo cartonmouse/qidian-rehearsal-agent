@@ -387,6 +387,17 @@ export interface AvailabilitySlot {
   end: string;
 }
 
+export interface CostumeCustodyRecord {
+  custody_id: string;
+  quantity: number;
+  holder: string;
+  scene_id: string | null;
+  scene_label: string;
+  expected_return_date: string | null;
+  expected_return_time: string | null;
+  note: string;
+}
+
 export interface ResourceInventoryItem {
   resource_id: string;
   category: "prop" | "costume";
@@ -402,6 +413,7 @@ export interface ResourceInventoryItem {
   expected_return_date: string | null;
   expected_return_time: string | null;
   custody_note: string;
+  custody_records: CostumeCustodyRecord[];
 }
 
 export interface CostumeCheckoutRequest {
@@ -416,6 +428,7 @@ export interface CostumeCheckoutRequest {
 
 export interface CostumeReturnRequest {
   quantity?: number | null;
+  custody_id?: string | null;
   note?: string;
 }
 
@@ -428,6 +441,8 @@ export interface CostumeCustodyAlert {
   holder: string;
   expected_return_at: string | null;
   message: string;
+  custody_id: string;
+  scene_label: string;
 }
 
 export interface ResourceAuditChange {

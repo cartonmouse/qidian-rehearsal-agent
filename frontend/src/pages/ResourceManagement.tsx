@@ -74,6 +74,7 @@ function createEmptyInventoryItem(): ResourceInventoryItem {
     expected_return_date: null,
     expected_return_time: null,
     custody_note: "",
+    custody_records: [],
   };
 }
 
@@ -531,6 +532,7 @@ function CostumeCustodyCard({
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const selected = costumes.find((item) => item.resource_id === resourceId) || costumes[0] || null;
+  const custodyRecords = selected?.custody_records || [];
 
   useEffect(() => {
     if (!selected) {
@@ -587,20 +589,20 @@ function CostumeCustodyCard({
     }
   }
 
-  async function handleReturn() {
+  async function handleReturn(custodyId?: string, holder?: string) {
     if (!selected || selected.borrowed_quantity <= 0) return;
     setSaving(true);
     setError("");
     setMessage("");
     try {
       const updated = await returnCostume(selected.resource_id, {
-        quantity: selected.borrowed_quantity,
+        custody_id: custodyId || null,
         note: form.note.trim(),
       });
       onUpdated(updated);
       await onRefreshAudits();
       await onRefreshAlerts();
-      setMessage(`已登记归还 ${updated.name}，当前全部在库。`);
+      setMessage(custodyId ? `已登记归还 ${updated.name}（${holder || "指定借用记录"}）。` : `已登记归还 ${updated.name}，当前全部在库。`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "服装归还登记失败");
     } finally {
@@ -625,7 +627,7 @@ function CostumeCustodyCard({
           <div className="mt-4 space-y-2">
             <div className="flex items-center gap-2 text-xs font-semibold text-text"><AlertTriangle size={14} className="text-orange" />归还提醒</div>
             {alerts.map((alert) => (
-              <div key={`${alert.resource_id}-${alert.alert_type}`} className={cn("rounded-lg border px-3 py-2 text-xs leading-5", alert.severity === "high" ? "border-red/25 bg-red/8 text-red" : alert.severity === "medium" ? "border-orange/25 bg-orange/8 text-orange" : "border-border bg-background/35 text-dim")}>
+              <div key={`${alert.resource_id}-${alert.custody_id || alert.holder}-${alert.alert_type}`} className={cn("rounded-lg border px-3 py-2 text-xs leading-5", alert.severity === "high" ? "border-red/25 bg-red/8 text-red" : alert.severity === "medium" ? "border-orange/25 bg-orange/8 text-orange" : "border-border bg-background/35 text-dim")}>
                 {alert.message}
               </div>
             ))}
@@ -645,6 +647,32 @@ function CostumeCustodyCard({
               <div className="rounded-lg border border-border bg-background/35 px-3 py-2 text-xs text-dim">可借 {availableQuantity} 件</div>
               <div className="rounded-lg border border-border bg-background/35 px-3 py-2 text-xs text-dim">已借 {selected?.borrowed_quantity || 0} 件</div>
             </div>
+
+            {selected?.borrowed_quantity > 0 && (
+              <div className="rounded-xl border border-border bg-background/30 p-3">
+                <div className="flex items-center justify-between gap-3 text-xs font-semibold text-text">
+                  <span>当前借用分配</span>
+                  <span className="font-normal text-dim">{custodyRecords.length || 1} 条记录</span>
+                </div>
+                {custodyRecords.length > 0 ? (
+                  <div className="mt-3 space-y-2">
+                    {custodyRecords.map((record) => (
+                      <div key={record.custody_id} className="flex flex-col gap-2 rounded-lg border border-border bg-background/35 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="text-xs leading-5 text-dim">
+                          <div className="font-medium text-text">{record.holder} · {record.quantity} 件{record.scene_label ? ` · ${record.scene_label}` : ""}</div>
+                          <div>{record.expected_return_date && record.expected_return_time ? `预计 ${record.expected_return_date} ${record.expected_return_time}` : "未设置预计归还时间"}{record.note ? ` · ${record.note}` : ""}</div>
+                        </div>
+                        <Button type="button" variant="outline" size="sm" onClick={() => void handleReturn(record.custody_id, record.holder)} disabled={saving}>
+                          归还此记录
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-2 text-xs leading-5 text-dim">这是旧版聚合借还记录，使用下方“归还全部”完成归还。</div>
+                )}
+              </div>
+            )}
 
             <div className="rounded-xl border border-border bg-background/30 p-3">
               <div className="grid gap-3 md:grid-cols-[0.65fr_1fr_1fr_1fr]">
@@ -668,7 +696,7 @@ function CostumeCustodyCard({
                 <Field label="借还备注">
                   <input value={form.note} onChange={(event) => setForm((current) => ({ ...current, note: event.target.value }))} className={INPUT_CLASS} placeholder="例如：演出后交回服装柜" disabled={saving} />
                 </Field>
-                <div className="text-xs leading-5 text-dim md:col-span-1">{selected?.borrowed_quantity ? `当前持有人：${selected.checked_out_to || "未记录"}${selected.checked_out_scene_label ? ` · ${selected.checked_out_scene_label}` : ""}` : "登记后会在调度快照中扣除可用容量。"}</div>
+                <div className="text-xs leading-5 text-dim md:col-span-1">{selected?.borrowed_quantity ? (custodyRecords.length > 1 ? `当前为多人借用，共 ${custodyRecords.length} 条分配记录` : `当前持有人：${selected.checked_out_to || "未记录"}${selected.checked_out_scene_label ? ` · ${selected.checked_out_scene_label}` : ""}`) : "登记后会在调度快照中扣除可用容量。"}</div>
                 <div className="flex gap-2 md:justify-end">
                   <Button type="button" size="sm" onClick={() => void handleCheckout()} disabled={saving || availableQuantity === 0}>
                     {saving ? <Loader2 className="animate-spin" /> : <Archive size={14} />}

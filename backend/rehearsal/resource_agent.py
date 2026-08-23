@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from backend.rehearsal.models import (
     CostumeCheckoutRequest,
+    CostumeCustodyRecord,
     CostumeCustodyAlert,
     CostumeReturnRequest,
     ResourceAuditChange,
@@ -55,6 +56,7 @@ _AUDIT_FIELD_LABELS = {
     "expected_return_date": "预计归还日期",
     "expected_return_time": "预计归还时间",
     "custody_note": "借还备注",
+    "custody_records": "多人借用记录",
     "room_name": "排练室",
     "date": "日期",
     "start": "开始时间",
@@ -78,6 +80,16 @@ _AUDIT_FIELD_LABELS = {
 
 def _normalize_name(value: str) -> str:
     return re.sub(r"\s+", "", value).casefold()
+
+
+def _custody_holder_summary(item: ResourceInventoryItem) -> str:
+    if item.custody_records:
+        return "、".join(
+            f"{record.holder} {record.quantity} 件"
+            f"{f'（{record.scene_label}）' if record.scene_label else ''}"
+            for record in item.custody_records
+        )
+    return item.checked_out_to or "未记录持有人"
 
 
 def room_booking_conflicts(candidate: RoomBookingRequest, existing: RoomBooking) -> bool:
@@ -181,8 +193,7 @@ class ResourceAgent:
         borrowed_costumes = [item for item in inventory if item.category == "costume" and item.borrowed_quantity > 0]
         if borrowed_costumes:
             labels = "、".join(
-                f"{item.name}（{item.borrowed_quantity} 件，{item.checked_out_to or '未记录持有人'}"
-                f"{f'，{item.checked_out_scene_label}' if item.checked_out_scene_label else ''}）"
+                f"{item.name}（{item.borrowed_quantity} 件，{_custody_holder_summary(item)}）"
                 for item in borrowed_costumes
             )
             warnings.append(f"服装当前存在借出状态：{labels}；排班容量已扣除借出数量，请核对归还时间。")
@@ -226,31 +237,30 @@ class CostumeCustodyAgent:
             raise ValueError("只有服装库存支持借出")
         if item.status != "available":
             raise ValueError(f"服装“{item.name}”当前状态为 {item.status}，不能借出")
-        available_quantity = item.quantity - item.borrowed_quantity
+        records = self._records_for_item(item)
+        borrowed_quantity = sum(record.quantity for record in records)
+        available_quantity = item.quantity - borrowed_quantity
         if request.quantity > available_quantity:
             raise ValueError(f"服装“{item.name}”可借出数量仅剩 {available_quantity} 件")
 
-        if item.borrowed_quantity > 0:
-            if self._normalize(item.checked_out_to) != self._normalize(request.holder):
-                raise ValueError(f"服装“{item.name}”已有借出记录，持有人为 {item.checked_out_to}")
-            if item.checked_out_scene_id and request.scene_id and item.checked_out_scene_id != request.scene_id:
-                raise ValueError(f"服装“{item.name}”已有借出场次，不能同时登记给不同场次")
-            if (
-                item.checked_out_scene_label
-                and request.scene_label
-                and self._normalize(item.checked_out_scene_label) != self._normalize(request.scene_label)
-            ):
-                raise ValueError(f"服装“{item.name}”已有借出场次，不能同时登记给不同场次")
-
-        return item.model_copy(update={
-            "borrowed_quantity": item.borrowed_quantity + request.quantity,
-            "checked_out_to": request.holder,
-            "checked_out_scene_id": request.scene_id or item.checked_out_scene_id,
-            "checked_out_scene_label": request.scene_label or item.checked_out_scene_label,
-            "expected_return_date": request.expected_return_date or item.expected_return_date,
-            "expected_return_time": request.expected_return_time or item.expected_return_time,
-            "custody_note": request.note or item.custody_note,
-        })
+        for index, record in enumerate(records):
+            if self._same_allocation(record, request):
+                records[index] = record.model_copy(update={
+                    "quantity": record.quantity + request.quantity,
+                    "note": request.note or record.note,
+                })
+                break
+        else:
+            records.append(CostumeCustodyRecord(
+                quantity=request.quantity,
+                holder=request.holder,
+                scene_id=request.scene_id,
+                scene_label=request.scene_label,
+                expected_return_date=request.expected_return_date,
+                expected_return_time=request.expected_return_time,
+                note=request.note,
+            ))
+        return self._apply_records(item, records)
 
     def return_item(
         self,
@@ -261,26 +271,40 @@ class CostumeCustodyAgent:
         item = self._find(inventory, resource_id)
         if item.category != "costume":
             raise ValueError("只有服装库存支持归还")
-        if item.borrowed_quantity <= 0:
+        records = self._records_for_item(item)
+        if not records:
             raise ValueError(f"服装“{item.name}”当前没有借出数量")
-        return_quantity = request.quantity or item.borrowed_quantity
-        if return_quantity > item.borrowed_quantity:
-            raise ValueError(f"服装“{item.name}”最多只能归还 {item.borrowed_quantity} 件")
 
-        remaining = item.borrowed_quantity - return_quantity
-        update = {"borrowed_quantity": remaining}
-        if request.note:
-            update["custody_note"] = request.note
-        if remaining == 0:
-            update.update({
-                "checked_out_to": "",
-                "checked_out_scene_id": None,
-                "checked_out_scene_label": "",
-                "expected_return_date": None,
-                "expected_return_time": None,
-                "custody_note": request.note,
+        if request.custody_id:
+            target_index = next(
+                (index for index, record in enumerate(records) if record.custody_id == request.custody_id),
+                None,
+            )
+            if target_index is None:
+                raise ValueError(f"服装“{item.name}”不存在借用记录 {request.custody_id}")
+        elif len(records) > 1 and request.quantity is not None:
+            raise ValueError("服装存在多人借用记录，请指定 custody_id 后再部分归还")
+        else:
+            target_index = 0
+
+        if not request.custody_id and request.quantity is None:
+            return self._apply_records(item, [], note=request.note)
+
+        target = records[target_index]
+        return_quantity = request.quantity or target.quantity
+        if return_quantity > target.quantity:
+            if request.custody_id:
+                raise ValueError(f"该借用记录最多只能归还 {target.quantity} 件")
+            raise ValueError(f"服装“{item.name}”最多只能归还 {target.quantity} 件")
+        remaining = target.quantity - return_quantity
+        if remaining:
+            records[target_index] = target.model_copy(update={
+                "quantity": remaining,
+                "note": request.note or target.note,
             })
-        return item.model_copy(update=update)
+        else:
+            records.pop(target_index)
+        return self._apply_records(item, records, note=request.note)
 
     def inspect_due(
         self,
@@ -294,53 +318,60 @@ class CostumeCustodyAgent:
         due_soon_limit = reference + timedelta(hours=max(0, due_soon_hours))
         alerts: list[CostumeCustodyAlert] = []
         for item in inventory:
-            if item.category != "costume" or item.borrowed_quantity <= 0:
+            if item.category != "costume":
                 continue
-            expected_return_at = None
-            if item.expected_return_date and item.expected_return_time:
-                expected = datetime.strptime(
-                    f"{item.expected_return_date} {item.expected_return_time}",
-                    "%Y-%m-%d %H:%M",
-                )
-                expected_return_at = expected.strftime("%Y-%m-%d %H:%M")
-                if expected < reference:
-                    alerts.append(CostumeCustodyAlert(
-                        resource_id=item.resource_id,
-                        name=item.name,
-                        alert_type="overdue",
-                        severity="high",
-                        borrowed_quantity=item.borrowed_quantity,
-                        holder=item.checked_out_to,
-                        expected_return_at=expected_return_at,
-                        message=(
-                            f"服装“{item.name}”已逾期，原定 {expected_return_at} 归还，"
-                            f"当前持有人：{item.checked_out_to or '未记录'}。"
-                        ),
-                    ))
-                elif expected <= due_soon_limit:
-                    alerts.append(CostumeCustodyAlert(
-                        resource_id=item.resource_id,
-                        name=item.name,
-                        alert_type="due_soon",
-                        severity="medium",
-                        borrowed_quantity=item.borrowed_quantity,
-                        holder=item.checked_out_to,
-                        expected_return_at=expected_return_at,
-                        message=(
-                            f"服装“{item.name}”将在 {expected_return_at} 前到期，"
-                            f"当前持有人：{item.checked_out_to or '未记录'}。"
-                        ),
-                    ))
-                continue
-            alerts.append(CostumeCustodyAlert(
-                resource_id=item.resource_id,
-                name=item.name,
-                alert_type="missing_deadline",
-                severity="low",
-                borrowed_quantity=item.borrowed_quantity,
-                holder=item.checked_out_to,
-                message=f"服装“{item.name}”仍有 {item.borrowed_quantity} 件借出，但没有预计归还时间。",
-            ))
+            for record in self._records_for_item(item):
+                expected_return_at = None
+                if record.expected_return_date and record.expected_return_time:
+                    expected = datetime.strptime(
+                        f"{record.expected_return_date} {record.expected_return_time}",
+                        "%Y-%m-%d %H:%M",
+                    )
+                    expected_return_at = expected.strftime("%Y-%m-%d %H:%M")
+                    if expected < reference:
+                        alerts.append(CostumeCustodyAlert(
+                            resource_id=item.resource_id,
+                            name=item.name,
+                            alert_type="overdue",
+                            severity="high",
+                            borrowed_quantity=record.quantity,
+                            holder=record.holder,
+                            expected_return_at=expected_return_at,
+                            message=(
+                                f"服装“{item.name}”的借用记录已逾期，原定 {expected_return_at} 归还，"
+                                f"当前持有人：{record.holder}。"
+                            ),
+                            custody_id=record.custody_id,
+                            scene_label=record.scene_label,
+                        ))
+                    elif expected <= due_soon_limit:
+                        alerts.append(CostumeCustodyAlert(
+                            resource_id=item.resource_id,
+                            name=item.name,
+                            alert_type="due_soon",
+                            severity="medium",
+                            borrowed_quantity=record.quantity,
+                            holder=record.holder,
+                            expected_return_at=expected_return_at,
+                            message=(
+                                f"服装“{item.name}”的借用记录将在 {expected_return_at} 前到期，"
+                                f"当前持有人：{record.holder}。"
+                            ),
+                            custody_id=record.custody_id,
+                            scene_label=record.scene_label,
+                        ))
+                    continue
+                alerts.append(CostumeCustodyAlert(
+                    resource_id=item.resource_id,
+                    name=item.name,
+                    alert_type="missing_deadline",
+                    severity="low",
+                    borrowed_quantity=record.quantity,
+                    holder=record.holder,
+                    message=f"服装“{item.name}”的借用记录仍有 {record.quantity} 件借出，但没有预计归还时间。",
+                    custody_id=record.custody_id,
+                    scene_label=record.scene_label,
+                ))
         severity_order = {"high": 0, "medium": 1, "low": 2}
         return sorted(
             alerts,
@@ -353,6 +384,75 @@ class CostumeCustodyAgent:
         if item is None:
             raise LookupError("库存记录不存在")
         return item
+
+    @staticmethod
+    def _records_for_item(item: ResourceInventoryItem) -> list[CostumeCustodyRecord]:
+        if item.custody_records:
+            return list(item.custody_records)
+        if item.borrowed_quantity <= 0:
+            return []
+        return [CostumeCustodyRecord(
+            custody_id=f"legacy-{item.resource_id}",
+            quantity=item.borrowed_quantity,
+            holder=item.checked_out_to,
+            scene_id=item.checked_out_scene_id,
+            scene_label=item.checked_out_scene_label,
+            expected_return_date=item.expected_return_date,
+            expected_return_time=item.expected_return_time,
+            note=item.custody_note,
+        )]
+
+    @classmethod
+    def _apply_records(
+        cls,
+        item: ResourceInventoryItem,
+        records: list[CostumeCustodyRecord],
+        *,
+        note: str | None = None,
+    ) -> ResourceInventoryItem:
+        if not records:
+            return item.model_copy(update={
+                "borrowed_quantity": 0,
+                "checked_out_to": "",
+                "checked_out_scene_id": None,
+                "checked_out_scene_label": "",
+                "expected_return_date": None,
+                "expected_return_time": None,
+                "custody_note": note or "",
+                "custody_records": [],
+            })
+        if len(records) == 1:
+            record = records[0]
+            return item.model_copy(update={
+                "borrowed_quantity": record.quantity,
+                "checked_out_to": record.holder,
+                "checked_out_scene_id": record.scene_id,
+                "checked_out_scene_label": record.scene_label,
+                "expected_return_date": record.expected_return_date,
+                "expected_return_time": record.expected_return_time,
+                "custody_note": note or record.note,
+                "custody_records": records,
+            })
+        return item.model_copy(update={
+            "borrowed_quantity": sum(record.quantity for record in records),
+            "checked_out_to": "多人借用",
+            "checked_out_scene_id": None,
+            "checked_out_scene_label": "",
+            "expected_return_date": None,
+            "expected_return_time": None,
+            "custody_note": note or "多人借用，请按记录分别归还",
+            "custody_records": records,
+        })
+
+    @classmethod
+    def _same_allocation(cls, record: CostumeCustodyRecord, request: CostumeCheckoutRequest) -> bool:
+        return (
+            cls._normalize(record.holder) == cls._normalize(request.holder)
+            and record.scene_id == request.scene_id
+            and cls._normalize(record.scene_label) == cls._normalize(request.scene_label)
+            and record.expected_return_date == request.expected_return_date
+            and record.expected_return_time == request.expected_return_time
+        )
 
     @staticmethod
     def _normalize(value: str) -> str:

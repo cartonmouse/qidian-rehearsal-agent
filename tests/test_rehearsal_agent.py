@@ -1255,7 +1255,7 @@ def test_resource_agent_explains_costume_handoff_to_schedule_agent():
     assert not any("尚未从剧本文本自动抽取" in warning for warning in result.warnings)
 
 
-def test_costume_custody_agent_tracks_partial_return_and_rejects_boundaries():
+def test_costume_custody_agent_tracks_allocations_and_rejects_boundaries():
     inventory = [ResourceInventoryItem(
         resource_id="costume-custody",
         category="costume",
@@ -1279,6 +1279,8 @@ def test_costume_custody_agent_tracks_partial_return_and_rejects_boundaries():
     assert checked_out.checked_out_to == "林澄"
     assert checked_out.checked_out_scene_label == "第一场"
     assert checked_out.expected_return_date == "2026-08-26"
+    assert len(checked_out.custody_records) == 1
+    assert checked_out.custody_records[0].holder == "林澄"
 
     overdue_alerts = agent.inspect_due([checked_out], as_of=datetime(2026, 8, 27, 9, 0))
     assert overdue_alerts[0].alert_type == "overdue"
@@ -1307,17 +1309,37 @@ def test_costume_custody_agent_tracks_partial_return_and_rejects_boundaries():
         request.model_copy(update={"quantity": 1}),
     )
     assert checked_out_twice.borrowed_quantity == 2
+    assert len(checked_out_twice.custody_records) == 1
+    assert checked_out_twice.custody_records[0].quantity == 2
 
-    try:
-        agent.checkout(
-            [checked_out],
-            "costume-custody",
-            request.model_copy(update={"holder": "顾言"}),
-        )
-    except ValueError as exc:
-        assert "持有人为 林澄" in str(exc)
-    else:
-        raise AssertionError("不同持有人不应覆盖现有借出记录")
+    multi_checked_out = agent.checkout(
+        [checked_out],
+        "costume-custody",
+        request.model_copy(update={
+            "holder": "顾言",
+            "scene_id": "scene-2",
+            "scene_label": "第二场",
+            "expected_return_date": "2026-08-27",
+            "expected_return_time": "20:00",
+            "note": "第二场领取",
+        }),
+    )
+    assert multi_checked_out.borrowed_quantity == 2
+    assert multi_checked_out.checked_out_to == "多人借用"
+    assert len(multi_checked_out.custody_records) == 2
+    assert {record.holder for record in multi_checked_out.custody_records} == {"林澄", "顾言"}
+    multi_alerts = agent.inspect_due([multi_checked_out], as_of=datetime(2026, 8, 27, 9, 0))
+    assert [alert.alert_type for alert in multi_alerts] == ["overdue", "due_soon"]
+    assert [alert.holder for alert in multi_alerts] == ["林澄", "顾言"]
+
+    targeted_return = agent.return_item(
+        [multi_checked_out],
+        "costume-custody",
+        CostumeReturnRequest(custody_id=multi_checked_out.custody_records[1].custody_id),
+    )
+    assert targeted_return.borrowed_quantity == 1
+    assert targeted_return.checked_out_to == "林澄"
+    assert [record.holder for record in targeted_return.custody_records] == ["林澄"]
 
     returned_part = agent.return_item(
         [checked_out_twice],

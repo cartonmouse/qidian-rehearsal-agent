@@ -685,17 +685,33 @@ def _evaluate_costume_custody(case: dict[str, Any], checks: list[CheckResult]) -
         expected["borrowed_snapshot"],
     )
 
-    try:
-        custody_agent.checkout(
-            [checked_out],
-            resource_id,
-            checkout_request.model_copy(update={"holder": str(case["different_holder"])}),
-        )
-    except ValueError as exc:
-        found = str(case["different_holder_error"]) in str(exc)
-        _check(checks, "different_holder_rejected", found, True, passed=found)
-    else:
-        _check(checks, "different_holder_rejected", False, True, passed=False)
+    multi_checked_out = custody_agent.checkout(
+        [checked_out],
+        resource_id,
+        CostumeCheckoutRequest(**case["second_checkout"]),
+    )
+    _check(checks, "multi_borrowed_quantity", multi_checked_out.borrowed_quantity, expected["multi_borrowed_quantity"])
+    _check(checks, "multi_holder_label", multi_checked_out.checked_out_to, expected["multi_holder_label"])
+    _check(checks, "multi_record_count", len(multi_checked_out.custody_records), expected["multi_record_count"])
+    _check(
+        checks,
+        "multi_record_holders",
+        [record.holder for record in multi_checked_out.custody_records],
+        expected["multi_record_holders"],
+    )
+    multi_alerts = custody_agent.inspect_due(
+        [multi_checked_out],
+        as_of=datetime.fromisoformat(str(case["overdue_as_of"])),
+    )
+    _check(checks, "multi_alert_types", [alert.alert_type for alert in multi_alerts], expected["multi_alert_types"])
+    _check(checks, "multi_alert_holders", [alert.holder for alert in multi_alerts], expected["multi_alert_holders"])
+    multi_returned = custody_agent.return_item(
+        [multi_checked_out],
+        resource_id,
+        CostumeReturnRequest(custody_id=multi_checked_out.custody_records[1].custody_id),
+    )
+    _check(checks, "targeted_return_quantity", multi_returned.borrowed_quantity, expected["targeted_return_quantity"])
+    _check(checks, "targeted_return_holder", multi_returned.checked_out_to, expected["targeted_return_holder"])
 
     try:
         custody_agent.return_item(

@@ -560,14 +560,21 @@
       "expected_return_time": "21:00",
       "note": "排练前领取"
     },
+    "second_checkout": {
+      "quantity": 1,
+      "holder": "顾言",
+      "scene_id": "scene-2",
+      "scene_label": "第二场",
+      "expected_return_date": "2026-08-27",
+      "expected_return_time": "20:00",
+      "note": "第二场领取"
+    },
     "return": {
       "quantity": 1,
       "note": "归还入柜"
     },
     "overdue_as_of": "2026-08-27T09:00:00",
     "overdue_message_contains": "已逾期",
-    "different_holder": "顾言",
-    "different_holder_error": "持有人为 林澄",
     "over_return_quantity": 2,
     "over_return_error": "最多只能归还 1 件",
     "expected": {
@@ -576,6 +583,14 @@
       "checked_out_scene": "第一场",
       "overdue_alert_type": "overdue",
       "overdue_alert_severity": "high",
+      "multi_borrowed_quantity": 2,
+      "multi_holder_label": "多人借用",
+      "multi_record_count": 2,
+      "multi_record_holders": ["林澄", "顾言"],
+      "multi_alert_types": ["overdue", "due_soon"],
+      "multi_alert_holders": ["林澄", "顾言"],
+      "targeted_return_quantity": 1,
+      "targeted_return_holder": "林澄",
       "borrowed_capacity": {"灰色外套": 1},
       "borrowed_snapshot": {"灰色外套": 1},
       "returned_quantity": 0,
