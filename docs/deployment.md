@@ -115,6 +115,20 @@ npm run dev
 http://localhost:5173
 ```
 
+如果本机已经有旧的前端或后端进程占用默认端口，必须让前端代理明确指向同一份代码启动的后端，避免出现“解析成功但页面报 `undefined.length`”这类版本错配。可以使用一组隔离端口：
+
+```powershell
+# 终端一：后端
+uvicorn backend.main:app --host 127.0.0.1 --port 8001
+
+# 终端二：前端（在仓库根目录执行）
+$env:TECHSPAR_API_TARGET = "http://127.0.0.1:8001"
+Set-Location frontend
+npm run dev -- --host 127.0.0.1 --port 5181
+```
+
+打开 `http://127.0.0.1:5181` 后，若仍提示结构字段缺失，先检查 `http://127.0.0.1:8001/openapi.json` 是否来自当前仓库，再清理旧的 Vite 页面或切换到上述隔离端口。前端会对缺少的数组字段做安全归一化，并在剧本解读结果中保留版本错配提醒；这只是兼容旧服务的保护，不会替代后端升级。
+
 ### 5. Docker 启动
 
 ```bash

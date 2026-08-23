@@ -743,6 +743,68 @@ async function ensureOk(response: Response, fallback = "剧本解析失败"): Pr
   throw new Error(detail);
 }
 
+function normalizeScriptAnalysis(payload: unknown): ScriptAnalysis {
+  if (!payload || typeof payload !== "object") {
+    throw new Error("剧本解析返回格式无效，请确保前后端使用同一版本");
+  }
+
+  const source = payload as Partial<ScriptAnalysis>;
+  if (typeof source.script_id !== "string" || typeof source.title !== "string") {
+    throw new Error("剧本解析返回格式无效，请确保前后端使用同一版本");
+  }
+
+  const rawScenes = Array.isArray(source.scenes) ? source.scenes : [];
+  const scenes = rawScenes.map((scene) => {
+    const value = scene as Partial<Scene>;
+    return {
+      ...value,
+      characters: Array.isArray(value.characters) ? value.characters : [],
+      props: Array.isArray(value.props) ? value.props : [],
+      costumes: Array.isArray(value.costumes) ? value.costumes : [],
+      lines: Array.isArray(value.lines) ? value.lines : [],
+      stage_directions: Array.isArray(value.stage_directions) ? value.stage_directions : [],
+    } as Scene;
+  });
+
+  const missingRootArrays = !Array.isArray(source.scenes)
+    || !Array.isArray(source.characters)
+    || !Array.isArray(source.props)
+    || !Array.isArray(source.costumes)
+    || !Array.isArray(source.warnings)
+    || !Array.isArray(source.trace);
+  const missingNestedArrays = rawScenes.some((scene) => {
+    if (!scene || typeof scene !== "object") return true;
+    const value = scene as Partial<Scene>;
+    return !Array.isArray(value.characters)
+      || !Array.isArray(value.props)
+      || !Array.isArray(value.costumes)
+      || !Array.isArray(value.lines)
+      || !Array.isArray(value.stage_directions);
+  });
+  const warnings = Array.isArray(source.warnings) ? source.warnings : [];
+  const compatibilityWarning = "后端返回的剧本结构缺少部分字段，请确保前后端使用同一版本。";
+
+  return {
+    script_id: source.script_id,
+    title: source.title,
+    version_label: source.version_label || "v1",
+    analysis_mode: source.analysis_mode || "deterministic",
+    parser_version: source.parser_version || "unknown",
+    review_status: source.review_status || "pending",
+    reviewed_at: source.reviewed_at || null,
+    review_note: source.review_note || "",
+    scenes,
+    characters: Array.isArray(source.characters) ? source.characters : [],
+    props: Array.isArray(source.props) ? source.props : [],
+    costumes: Array.isArray(source.costumes) ? source.costumes : [],
+    warnings: missingRootArrays || missingNestedArrays
+      ? [...warnings, compatibilityWarning]
+      : warnings,
+    trace: Array.isArray(source.trace) ? source.trace : [],
+    created_at: source.created_at || new Date().toISOString(),
+  };
+}
+
 export async function parseScript(payload: {
   title: string;
   version_label: string;
@@ -755,7 +817,7 @@ export async function parseScript(payload: {
     body: JSON.stringify(payload),
   });
   await ensureOk(response);
-  return response.json();
+  return normalizeScriptAnalysis(await response.json());
 }
 
 export async function getAgentRuns(limit = 50): Promise<AgentRunRecord[]> {
@@ -785,7 +847,7 @@ export async function parseScriptFile(file: File, versionLabel: string): Promise
     body,
   });
   await ensureOk(response);
-  return response.json();
+  return normalizeScriptAnalysis(await response.json());
 }
 
 export async function getScripts(): Promise<ScriptSummary[]> {
@@ -798,7 +860,7 @@ export async function getScripts(): Promise<ScriptSummary[]> {
 export async function getScript(scriptId: string): Promise<ScriptAnalysis> {
   const response = await authFetch(`/api/rehearsal/scripts/${encodeURIComponent(scriptId)}`);
   await ensureOk(response);
-  return response.json();
+  return normalizeScriptAnalysis(await response.json());
 }
 
 export async function compareScriptVersions(
@@ -839,7 +901,7 @@ export async function reviewScript(
     body: JSON.stringify(payload),
   });
   await ensureOk(response);
-  return response.json();
+  return normalizeScriptAnalysis(await response.json());
 }
 
 export async function generateScheduleDraft(
