@@ -6,7 +6,6 @@ import useAuth from "./hooks/useAuth";
 import Sidebar from "./components/Sidebar";
 import TaskNotification from "./components/TaskNotification";
 import ErrorBoundary from "./components/ErrorBoundary";
-import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Interview from "./pages/Interview";
 import Review from "./pages/Review";
@@ -65,7 +64,7 @@ function PublicHome() {
   const { token, loading } = useAuth();
   if (loading) return null;
   if (token) return <Navigate to="/profile" replace />;
-  return <Landing />;
+  return <Navigate to="/login" replace />;
 }
 
 function AuthPage() {
