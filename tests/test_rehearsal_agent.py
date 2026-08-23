@@ -1452,7 +1452,15 @@ def test_inventory_routes_keep_custody_actions_user_scoped_and_protect_put_updat
     assert alerts[0].severity == "high"
     assert alerts[0].holder == "林澄"
 
-    stale_client_snapshot = checked_out.model_copy(update={"borrowed_quantity": 0, "checked_out_to": ""})
+    stale_client_snapshot = checked_out.model_copy(
+        update={
+            "borrowed_quantity": 0,
+            "checked_out_to": "",
+            # Simulate a legacy/stale client that does not send the new
+            # per-holder allocation field back with its inventory snapshot.
+            "custody_records": [],
+        },
+    )
     with patch("backend.routers.rehearsal.get_inventory", return_value=[checked_out]), \
         patch("backend.routers.rehearsal.save_inventory") as save_inventory, \
         patch("backend.routers.rehearsal._audit_resource_change"):
