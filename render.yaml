@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: qidian-rehearsal-agent
+    runtime: docker
+    plan: free
+    dockerfilePath: ./deploy/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DEFAULT_EMAIL
+        value: demo@qidian.local
+      - key: DEFAULT_PASSWORD
+        generateValue: true
+      - key: DEFAULT_NAME
+        value: 奇点演示用户
+      - key: ALLOW_REGISTRATION
+        value: "true"

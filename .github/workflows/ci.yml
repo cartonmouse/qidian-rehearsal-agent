@@ -81,3 +81,6 @@ jobs:
         run: |
           cp .env.example .env
           docker compose config
+
+      - name: Build public demo image
+        run: docker build --file deploy/Dockerfile --tag qidian-rehearsal-agent:ci .

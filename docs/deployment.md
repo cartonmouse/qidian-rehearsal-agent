@@ -214,7 +214,23 @@ ALIYUN_OSS_ENDPOINT=oss-cn-shanghai.aliyuncs.com
 * 如果你在线上要使用麦克风或录音相关能力，建议启用 HTTPS；浏览器对非 `localhost` 的音频权限更严格。
 * 线上环境不要保留默认的 `JWT_SECRET`、`DEFAULT_PASSWORD`。
 
-### 9. GitHub CI
+### 9. GitHub → Render 面试演示部署
+
+仓库根目录的 `render.yaml` 和 `deploy/Dockerfile` 已准备好一个前后端合一的公开演示服务：Nginx 提供 React 页面，同时把 `/api` 和 `/ws` 反向代理到 FastAPI。这样不需要额外配置前端 API 地址，适合面试演示。
+
+操作步骤：
+
+1. 将仓库推送到 GitHub，并确认 `main` 分支包含 `render.yaml`。
+2. 在 Render 中选择 **New → Blueprint**，连接 GitHub 仓库并选择 `render.yaml`。
+3. 创建服务后等待构建完成，Render 会分配一个 `onrender.com` 访问地址。
+4. 打开该地址注册演示账号；规则解析、人工确认、调度、排班、原词对词和资源管理不要求填写 LLM/Embedding API。
+5. 如果要演示适应性对词、LLM 剧本问答或语义检索，再在登录后的设置页填写自己的模型服务。不要把 API Key 写进仓库或 `render.yaml`。
+
+这是面试演示配置：`ALLOW_REGISTRATION=true` 便于评委直接注册，JWT 密钥和默认密码由托管平台生成。免费实例的本地文件系统可能在重启或休眠后重置，因此不要上传真实剧本或个人资料；需要长期保存数据时，应改用带持久磁盘/数据库的付费部署方案。
+
+当前仓库只提供可复现的托管配置，不把“已生成 Render 网址”冒充成已上线；必须在 Render 账户中完成一次 Blueprint 创建后才会产生真实网址。
+
+### 10. GitHub CI
 
 仓库中的 `.github/workflows/ci.yml` 会在 `main`/`master` 推送和 Pull Request 上执行：
 

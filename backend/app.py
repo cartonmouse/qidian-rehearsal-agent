@@ -56,6 +56,11 @@ def create_app() -> FastAPI:
             },
         )
 
+    @app.get("/health", include_in_schema=False)
+    async def health_check():
+        """Lightweight health endpoint for Docker and public hosting probes."""
+        return {"status": "ok"}
+
     app.include_router(auth.router)
     app.include_router(resume.router)
     app.include_router(recording.router)
