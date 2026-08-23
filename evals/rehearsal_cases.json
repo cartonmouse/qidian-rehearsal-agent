@@ -596,5 +596,34 @@
       "returned_quantity": 0,
       "returned_capacity": {"灰色外套": 2}
     }
+  },
+  {
+    "id": "real-sample-parse-schedule-line-reading",
+    "kind": "real_sample",
+    "title": "轨道之外",
+    "version_label": "demo-v1",
+    "script_path": "docs/examples/qidian-demo-script.md",
+    "availability_path": "docs/examples/qidian-actor-availability-feasible.csv",
+    "analysis_mode": "rules",
+    "review_status": "confirmed",
+    "default_minutes": 45,
+    "costume_changeover_minutes": 10,
+    "line_reading": {
+      "scene_number": 1,
+      "character": "小林",
+      "mode": "strict"
+    },
+    "expected": {
+      "scene_count": 2,
+      "availability_slot_count": 4,
+      "scheduled_count": 2,
+      "unassigned_count": 0,
+      "first_task_date": "2026-08-25",
+      "first_task_start": "19:00",
+      "line_reading_engine": "strict",
+      "line_reading_prompt_character": "小林",
+      "line_reading_finished": true,
+      "line_reading_cursor": 4
+    }
   }
 ]

@@ -121,7 +121,7 @@ npm run dev
 ```
 
 示例剧本位于 [`docs/examples/qidian-demo-script.md`](docs/examples/qidian-demo-script.md) 和 [`docs/examples/qidian-echo-room-script.md`](docs/examples/qidian-echo-room-script.md)。
-演员档期示例位于 [`docs/examples/qidian-actor-availability.csv`](docs/examples/qidian-actor-availability.csv)。
+演员档期主路径样例位于 [`docs/examples/qidian-actor-availability-feasible.csv`](docs/examples/qidian-actor-availability-feasible.csv)；[`docs/examples/qidian-actor-availability.csv`](docs/examples/qidian-actor-availability.csv) 保留了无共同时间的冲突样例。
 完整演示步骤、面试讲解话术和提交前验证清单位于 [`docs/demo-and-interview.md`](docs/demo-and-interview.md)。
 Agent 评估集说明和面试讲解要点位于 [`docs/agent-evaluation.md`](docs/agent-evaluation.md)。
 完整环境变量、Docker 和线上安全注意事项见 [`docs/deployment.md`](docs/deployment.md)。

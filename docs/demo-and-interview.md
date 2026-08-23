@@ -26,7 +26,7 @@ npm run dev
 
 ## 二、8 分钟完整演示
 
-建议使用仓库内的示例剧本 [`docs/examples/qidian-demo-script.md`](examples/qidian-demo-script.md) 或 [`docs/examples/qidian-echo-room-script.md`](examples/qidian-echo-room-script.md)，以及演员档期 [`docs/examples/qidian-actor-availability.csv`](examples/qidian-actor-availability.csv)。
+建议使用仓库内的示例剧本 [`docs/examples/qidian-demo-script.md`](examples/qidian-demo-script.md) 或 [`docs/examples/qidian-echo-room-script.md`](examples/qidian-echo-room-script.md)，以及可完成主路径排班的演员档期 [`docs/examples/qidian-actor-availability-feasible.csv`](examples/qidian-actor-availability-feasible.csv)。原 [`docs/examples/qidian-actor-availability.csv`](examples/qidian-actor-availability.csv) 是专门用于演示“无共同时间”边界的冲突样例。
 
 ### 1. 剧本解析与人工确认
 
@@ -51,7 +51,7 @@ npm run dev
 
 ### 3. 演员排练表与调度 Agent
 
-进入“演员排练表”，导入示例 CSV，先看预览和行级校验，再保存演员时间池。
+进入“演员排练表”，导入可排班示例 CSV，先看预览和行级校验，再保存演员时间池；需要演示“未排班”时改用冲突样例 CSV。
 
 回到排练工作台，选择已确认剧本并生成调度：
 

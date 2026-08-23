@@ -8,6 +8,7 @@ feasibility, resource explanations, and source-backed RAG evidence.
 
 from __future__ import annotations
 
+import csv
 import json
 from contextlib import ExitStack
 from dataclasses import asdict, dataclass
@@ -595,6 +596,85 @@ def _evaluate_line_reading_session(case: dict[str, Any], checks: list[CheckResul
     _check(checks, "source_lines_valid", source_lines_valid, expected.get("source_lines_valid", True))
 
 
+def _load_availability_csv(path: Path) -> list[AvailabilitySlot]:
+    """Load the same four-column Chinese CSV format used by the frontend demo."""
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        rows = csv.DictReader(handle)
+        required_headers = {"演员", "日期", "开始时间", "结束时间"}
+        if not rows.fieldnames or not required_headers.issubset(rows.fieldnames):
+            raise ValueError("档期样例必须包含演员、日期、开始时间、结束时间四列")
+        return [AvailabilitySlot(
+            actor=str(row["演员"] or ""),
+            date=str(row["日期"] or ""),
+            start=str(row["开始时间"] or ""),
+            end=str(row["结束时间"] or ""),
+        ) for row in rows]
+
+
+def _evaluate_real_sample(case: dict[str, Any], checks: list[CheckResult]) -> None:
+    """Run one repository sample through parse -> review -> schedule -> line reading."""
+    analysis = _analysis(case).model_copy(update={
+        "review_status": case.get("review_status", "confirmed"),
+    })
+    availability_path = REPO_ROOT / str(case["availability_path"])
+    slots = _load_availability_csv(availability_path)
+    schedule_agent = RehearsalScheduleAgent()
+    draft = schedule_agent.run(
+        analysis,
+        default_minutes=int(case.get("default_minutes", 45)),
+        costume_changeover_minutes=int(case.get("costume_changeover_minutes", 10)),
+    )
+    planned = schedule_agent.assign(draft, slots)
+    expected = case["expected"]
+    _check(checks, "scene_count", len(analysis.scenes), expected["scene_count"])
+    _check(checks, "availability_slot_count", len(slots), expected["availability_slot_count"])
+    _check(checks, "scheduled_count", sum(task.status in {"scheduled", "overridden"} for task in planned.tasks), expected["scheduled_count"])
+    _check(checks, "unassigned_count", sum(task.status == "unassigned" for task in planned.tasks), expected["unassigned_count"])
+    first_task = planned.tasks[0]
+    _check(checks, "first_task_date", first_task.scheduled_date, expected["first_task_date"])
+    _check(checks, "first_task_start", first_task.scheduled_start, expected["first_task_start"])
+    _check(checks, "tool_workflow_has_assignment", "find_common_actor_slot" in [call.tool_name for call in planned.tool_calls], True)
+
+    line_reading = case.get("line_reading")
+    if not line_reading:
+        return
+    scene = analysis.scenes[int(line_reading["scene_number"]) - 1]
+    agent = LineReadingSessionAgent()
+    first, session = agent.advance(
+        analysis,
+        LineReadingRequest(
+            scene_id=scene.scene_id,
+            character=str(line_reading["character"]),
+            mode=str(line_reading.get("mode", "strict")),
+        ),
+    )
+    if first.actor_prompt is None:
+        raise ValueError("真实样例对词第一步没有返回练习者台词提示")
+    second, finished_session = agent.advance(
+        analysis,
+        LineReadingRequest(
+            scene_id=scene.scene_id,
+            character=str(line_reading["character"]),
+            mode=str(line_reading.get("mode", "strict")),
+            line_index=99,
+            user_text=first.actor_prompt.text,
+            session_id=session.session_id,
+        ),
+        session=session,
+    )
+    _check(checks, "line_reading_engine", first.engine, expected["line_reading_engine"])
+    _check(checks, "line_reading_prompt_character", first.actor_prompt.character, expected["line_reading_prompt_character"])
+    _check(checks, "line_reading_finished", second.finished, expected["line_reading_finished"])
+    _check(checks, "line_reading_cursor", finished_session.line_index, expected["line_reading_cursor"])
+    _check(checks, "line_reading_session_stable", first.session_id == second.session_id == session.session_id, True)
+    _check(
+        checks,
+        "line_reading_source_lines_valid",
+        all(item.source_line is None or item.source_line >= 1 for item in finished_session.transcript),
+        True,
+    )
+
+
 def _evaluate_version_diff(case: dict[str, Any], checks: list[CheckResult]) -> None:
     current = _analysis(case)
     previous = ScriptAnalysisAgent().run(
@@ -770,6 +850,8 @@ def _run_case(case: dict[str, Any]) -> CaseResult:
             _evaluate_rag(case, checks)
         elif kind == "line_reading_session":
             _evaluate_line_reading_session(case, checks)
+        elif kind == "real_sample":
+            _evaluate_real_sample(case, checks)
         elif kind == "version_diff":
             _evaluate_version_diff(case, checks)
         elif kind == "costume_custody":

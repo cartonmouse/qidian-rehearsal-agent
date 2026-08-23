@@ -4,7 +4,7 @@
 
 ## 覆盖范围
 
-当前包含 16 个用例：
+当前包含 17 个用例：
 
 | 用例 | 验证内容 |
 | --- | --- |
@@ -17,6 +17,7 @@
 | `schedule-costume-changeover` | 同一演员前后场次服装变化时，自动排班预留 10 分钟换装缓冲；同服装不额外占用时间，档期不足和批量确认冲突均给出可解释原因 |
 | `version-costume-resource-impact` | 版本差异识别新增/移除服装，生成资源复核影响，并保留服装清单作为下游输入 |
 | `costume-custody-capacity` | 借出/归还动作、多人持有人分配、`custody_id` 定向归还、审计操作合同、超额归还边界、逾期提醒，以及借出后服装容量扣除和归还后恢复 |
+| `real-sample-parse-schedule-line-reading` | 直接读取仓库中的中文 CSV 档期样例，把《轨道之外》从解析、人工确认、自动排班推进到原词对词会话，并检查来源行号和会话游标 |
 | `schedule-unassigned` | 演员没有共同时间时，任务标记为未排班、给出冲突优先级，并提供分组排练等候选方案 |
 | `schedule-missing-availability` | 缺少演员档期时，任务说明缺失角色，并提供补充档期方案 |
 | `resource-check-scene` | 道具库存的已就绪、维修中、缺失状态和解释是否正确 |
