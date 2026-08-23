@@ -23,6 +23,9 @@ import {
   parseScriptFile,
   planSchedule as planScheduleApi,
   getAvailability,
+  getScript,
+  getScripts,
+  getScheduleDraft,
   reviewScript,
   saveAvailability,
   generateScheduleDraft,
@@ -143,12 +146,51 @@ function splitLabels(value: string): string[] {
     .filter((item, index, items) => items.indexOf(item) === index);
 }
 
+interface StoredWorkspace {
+  title?: string;
+  versionLabel?: string;
+  scriptText?: string;
+  scriptId?: string | null;
+}
+
+const WORKSPACE_STORAGE_PREFIX = "qidian:rehearsal:studio:";
+
+function workspaceStorageKey(): string {
+  try {
+    const storedUser = localStorage.getItem("user");
+    const user = storedUser ? JSON.parse(storedUser) as { email?: unknown; username?: unknown } : null;
+    const identity = typeof user?.email === "string" && user.email.trim()
+      ? user.email.trim().toLowerCase()
+      : typeof user?.username === "string" && user.username.trim()
+        ? user.username.trim()
+        : "current";
+    return `${WORKSPACE_STORAGE_PREFIX}${identity}`;
+  } catch {
+    return `${WORKSPACE_STORAGE_PREFIX}current`;
+  }
+}
+
+function readStoredWorkspace(): StoredWorkspace {
+  try {
+    const value = localStorage.getItem(workspaceStorageKey());
+    if (!value) return {};
+    const parsed = JSON.parse(value) as StoredWorkspace;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 export default function RehearsalStudio() {
-  const [title, setTitle] = useState("轨道之外");
-  const [versionLabel, setVersionLabel] = useState("v1");
-  const [scriptText, setScriptText] = useState(DEMO_SCRIPT);
+  const [storedWorkspace] = useState<StoredWorkspace>(() => readStoredWorkspace());
+  const [title, setTitle] = useState(storedWorkspace.title || "轨道之外");
+  const [versionLabel, setVersionLabel] = useState(storedWorkspace.versionLabel || "v1");
+  const [scriptText, setScriptText] = useState(storedWorkspace.scriptText || DEMO_SCRIPT);
   const [analysis, setAnalysis] = useState<ScriptAnalysis | null>(null);
   const [schedule, setSchedule] = useState<ScheduleDraft | null>(null);
+  const [activeScriptId, setActiveScriptId] = useState<string | null>(storedWorkspace.scriptId || null);
+  const [workspaceRestoring, setWorkspaceRestoring] = useState(true);
+  const [workspaceMessage, setWorkspaceMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [scheduling, setScheduling] = useState(false);
   const [planning, setPlanning] = useState(false);
@@ -165,6 +207,7 @@ export default function RehearsalStudio() {
 
   useEffect(() => {
     let cancelled = false;
+
     void getAvailability()
       .then((slots) => {
         if (!cancelled) setAvailabilityText(formatAvailabilityText(slots));
@@ -172,10 +215,67 @@ export default function RehearsalStudio() {
       .catch(() => {
         // The time pool is an optional enhancement; local input remains usable if it cannot be loaded.
       });
+
+    async function restoreWorkspace() {
+      try {
+        const scripts = await getScripts();
+        if (cancelled) return;
+
+        const savedScript = storedWorkspace.scriptId
+          ? scripts.find((item) => item.script_id === storedWorkspace.scriptId)
+          : undefined;
+        const targetScript = savedScript || scripts[0];
+        if (!targetScript) return;
+
+        const [restoredAnalysis, restoredSchedule] = await Promise.all([
+          getScript(targetScript.script_id),
+          getScheduleDraft(targetScript.script_id),
+        ]);
+        if (cancelled) return;
+
+        setTitle(restoredAnalysis.title);
+        setVersionLabel(restoredAnalysis.version_label);
+        setAnalysis(restoredAnalysis);
+        setSchedule(restoredSchedule);
+        setActiveScriptId(restoredAnalysis.script_id);
+        setReviewing(false);
+        setReviewDrafts({});
+        setWorkspaceMessage(`已恢复上次排练：${restoredAnalysis.title} · ${restoredAnalysis.version_label}`);
+
+        if (storedWorkspace.scriptId !== restoredAnalysis.script_id || !storedWorkspace.scriptText) {
+          setScriptText(`已恢复“${restoredAnalysis.title}”的解析结果。若需重新解析，请粘贴或上传剧本原文。`);
+        }
+      } catch {
+        if (!cancelled) {
+          setWorkspaceMessage("上次排练结果暂时无法恢复，你仍可以继续使用当前页面。" );
+        }
+      } finally {
+        if (!cancelled) setWorkspaceRestoring(false);
+      }
+    }
+
+    void restoreWorkspace();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [storedWorkspace]);
+
+  useEffect(() => {
+    if (workspaceRestoring) return;
+    const timer = window.setTimeout(() => {
+      try {
+        localStorage.setItem(workspaceStorageKey(), JSON.stringify({
+          title,
+          versionLabel,
+          scriptText,
+          scriptId: activeScriptId,
+        } satisfies StoredWorkspace));
+      } catch {
+        // The server remains the source of truth for parsed scripts and schedules.
+      }
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [activeScriptId, scriptText, title, versionLabel, workspaceRestoring]);
 
   async function analyze() {
     const value = scriptText.trim();
@@ -194,8 +294,10 @@ export default function RehearsalStudio() {
         script_text: value,
       });
       setAnalysis(result);
+      setActiveScriptId(result.script_id);
       setSchedule(null);
       setReviewing(false);
+      setWorkspaceMessage(`已解析并保存：${result.title} · ${result.version_label}`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "剧本解析失败");
     } finally {
@@ -209,12 +311,16 @@ export default function RehearsalStudio() {
     setError("");
     setReviewMessage("");
     try {
+      const isTextScript = /\.(txt|md|markdown)$/i.test(file.name);
+      const sourceText = isTextScript ? await file.text() : `已上传 ${file.name}，解析结果已保存。`;
       const result = await parseScriptFile(file, versionLabel.trim() || "v1");
       setTitle(result.title);
-      setScriptText(`已上传 ${file.name}，解析结果已保存。`);
+      setScriptText(sourceText);
       setAnalysis(result);
+      setActiveScriptId(result.script_id);
       setSchedule(null);
       setReviewing(false);
+      setWorkspaceMessage(`已解析并保存：${result.title} · ${result.version_label}`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "文件解析失败");
     } finally {
@@ -264,9 +370,11 @@ export default function RehearsalStudio() {
         review_note: reviewNote.trim(),
       });
       setAnalysis(updated);
+      setActiveScriptId(updated.script_id);
       setSchedule(null);
       setReviewing(false);
       setReviewDrafts({});
+      setWorkspaceMessage(`人工确认已保存：${updated.title} · ${updated.version_label}`);
       setReviewMessage(status === "edited" ? "人工修改已保存，剧本结构可以进入排练调度。" : "已确认解析结果，可以进入排练调度。");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "审核结果保存失败");
@@ -280,7 +388,10 @@ export default function RehearsalStudio() {
     setScheduling(true);
     setError("");
     try {
-      setSchedule(await generateScheduleDraft(analysis.script_id, 45, preview));
+      const result = await generateScheduleDraft(analysis.script_id, 45, preview);
+      setSchedule(result);
+      setActiveScriptId(result.script_id);
+      setWorkspaceMessage(preview ? "调度预览已保存。" : "调度草案已保存。" );
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "排练调度草案生成失败");
     } finally {
@@ -300,7 +411,10 @@ export default function RehearsalStudio() {
     setPlanning(true);
     setError("");
     try {
-      setSchedule(await planScheduleApi(analysis.script_id, slots));
+      const result = await planScheduleApi(analysis.script_id, slots);
+      setSchedule(result);
+      setActiveScriptId(result.script_id);
+      setWorkspaceMessage("自动排班结果已保存。" );
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "自动排班失败");
     } finally {
@@ -376,6 +490,13 @@ export default function RehearsalStudio() {
           当前节点 · 剧本解析
         </div>
       </div>
+
+      {(workspaceRestoring || workspaceMessage) && (
+        <div className="flex items-center gap-2 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-primary">
+          {workspaceRestoring && <Loader2 size={14} className="animate-spin" />}
+          {workspaceRestoring ? "正在恢复上次排练工作状态…" : workspaceMessage}
+        </div>
+      )}
 
       <div className="rounded-2xl border border-primary/20 bg-primary/5 p-3.5 md:p-4">
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -546,7 +667,13 @@ export default function RehearsalStudio() {
 
         <Card className="min-h-[680px] overflow-hidden">
           <CardContent className="h-full p-4 md:p-5">
-            {!analysis ? (
+            {workspaceRestoring ? (
+              <div className="flex h-full min-h-[640px] flex-col items-center justify-center text-center">
+                <Loader2 size={30} className="animate-spin text-primary" />
+                <div className="mt-5 text-xl font-semibold">正在恢复排练工作台</div>
+                <p className="mt-2 max-w-md text-sm leading-6 text-dim">正在读取上次保存的剧本解析结果、人工确认状态和调度结果。</p>
+              </div>
+            ) : !analysis ? (
               <div className="flex h-full min-h-[640px] flex-col items-center justify-center text-center">
                 <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/12 text-primary">
                   <Orbit size={30} />
