@@ -34,6 +34,9 @@ export default function Onboarding() {
   const [embApiBase, setEmbApiBase] = useState("");
   const [embApiKey, setEmbApiKey] = useState("");
   const [embApiModel, setEmbApiModel] = useState("");
+  const [embBackend, setEmbBackend] = useState("api");
+  const [embLocalModel, setEmbLocalModel] = useState("");
+  const [embLocalPath, setEmbLocalPath] = useState("");
 
   // 保留 training/services/system,保存时不被覆盖
   const [base, setBase] = useState(null);
@@ -45,9 +48,12 @@ export default function Onboarding() {
         setApiKey(data.llm?.api_key || "");
         setModel(data.llm?.model || "");
         const emb = data.embedding || {};
+        setEmbBackend(emb.backend === "local" ? "local" : "api");
         setEmbApiBase(emb.api_base || "");
         setEmbApiKey(emb.api_key || "");
         setEmbApiModel(emb.api_model || "");
+        setEmbLocalModel(emb.local_model || "");
+        setEmbLocalPath(emb.local_path || "");
         setBase(data);
       })
       .catch((e) => setError("加载失败：" + e.message))
@@ -55,7 +61,9 @@ export default function Onboarding() {
   }, []);
 
   const llmReady = apiKey.trim() && model.trim();
-  const embReady = embApiKey.trim() && embApiModel.trim();
+  const embReady = embBackend === "local"
+    ? (embLocalModel.trim() || embLocalPath.trim())
+    : (embApiKey.trim() && embApiModel.trim());
 
   // 进入下一步前先实测 LLM；连不通就拦住，不让继续。
   async function handleNext() {
@@ -83,12 +91,24 @@ export default function Onboarding() {
     setSaving(true);
     setError("");
     try {
-      const r = await testEmbeddingConnection({
-        backend: "api",
-        api_base: embApiBase.trim(),
-        api_key: embApiKey.trim(),
-        api_model: embApiModel.trim(),
-      });
+      const embedding = embBackend === "local"
+        ? {
+            backend: "local",
+            api_base: "",
+            api_key: "",
+            api_model: "",
+            local_model: embLocalModel.trim(),
+            local_path: embLocalPath.trim(),
+          }
+        : {
+            backend: "api",
+            api_base: embApiBase.trim(),
+            api_key: embApiKey.trim(),
+            api_model: embApiModel.trim(),
+            local_model: "",
+            local_path: "",
+          };
+      const r = await testEmbeddingConnection(embedding);
       if (!r.ok) {
         setError("Embedding 连接失败：" + r.error);
         setSaving(false);
@@ -101,14 +121,7 @@ export default function Onboarding() {
           model: model.trim(),
           temperature: base?.llm?.temperature ?? 0.7,
         },
-        embedding: {
-          backend: "api",
-          api_base: embApiBase.trim(),
-          api_key: embApiKey.trim(),
-          api_model: embApiModel.trim(),
-          local_model: "",
-          local_path: "",
-        },
+        embedding,
         services: base?.services || {},
         system: base?.system || { allow_registration: false },
         training: base?.training || { num_questions: 10, divergence: 3 },
@@ -206,32 +219,71 @@ export default function Onboarding() {
             ) : (
               <div className="space-y-4">
                 <div className="text-[13px] text-dim">
-                  Embedding 用于知识库 / 个人资料库 / 记忆向量化；简历会直接读取全文。免费示例:SiliconFlow 的 <span className="text-text">BAAI/bge-large-zh-v1.5</span>。可与 LLM 用不同服务商。
+                  Embedding 用于知识库 / 个人资料库 / 记忆向量化；简历会直接读取全文。可以使用 API，也可以在本机加载 HuggingFace 模型。
                 </div>
-                <div className="space-y-2">
-                  <Label className={labelClass}>API Base URL</Label>
-                  <Input className={inputClass} autoComplete="off" placeholder="例：https://api.siliconflow.cn/v1（OpenAI 官方可留空）" value={embApiBase} onChange={(e) => setEmbApiBase(e.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <Label className={labelClass}>Embedding Model</Label>
-                  <Input className={inputClass} autoComplete="off" placeholder="例：BAAI/bge-m3" value={embApiModel} onChange={(e) => setEmbApiModel(e.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <Label className={labelClass}>API Key</Label>
-                  <div className="relative">
-                    <Input
-                      className={cn(inputClass, "pr-11")}
-                      type={showEmbKey ? "text" : "password"}
-                      autoComplete="new-password"
-                      placeholder="sk-..."
-                      value={embApiKey}
-                      onChange={(e) => setEmbApiKey(e.target.value)}
-                    />
-                    <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-dim hover:text-text" onClick={() => setShowEmbKey((v) => !v)}>
-                      {showEmbKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { value: "api", label: "Embedding API" },
+                    { value: "local", label: "本地模型" },
+                  ].map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setEmbBackend(option.value)}
+                      className={cn(
+                        "rounded-xl border px-3.5 py-2 text-sm transition-colors",
+                        embBackend === option.value
+                          ? "border-primary/50 bg-primary/12 font-medium text-primary"
+                          : "border-border bg-card/80 text-dim hover:bg-hover hover:text-text",
+                      )}
+                    >
+                      {option.label}
                     </button>
-                  </div>
+                  ))}
                 </div>
+
+                {embBackend === "api" ? (
+                  <>
+                    <div className="space-y-2">
+                      <Label className={labelClass}>API Base URL</Label>
+                      <Input className={inputClass} autoComplete="off" placeholder="例：https://api.siliconflow.cn/v1（OpenAI 官方可留空）" value={embApiBase} onChange={(e) => setEmbApiBase(e.target.value)} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className={labelClass}>Embedding Model</Label>
+                      <Input className={inputClass} autoComplete="off" placeholder="例：BAAI/bge-m3" value={embApiModel} onChange={(e) => setEmbApiModel(e.target.value)} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className={labelClass}>API Key</Label>
+                      <div className="relative">
+                        <Input
+                          className={cn(inputClass, "pr-11")}
+                          type={showEmbKey ? "text" : "password"}
+                          autoComplete="new-password"
+                          placeholder="sk-..."
+                          value={embApiKey}
+                          onChange={(e) => setEmbApiKey(e.target.value)}
+                        />
+                        <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-dim hover:text-text" onClick={() => setShowEmbKey((v) => !v)}>
+                          {showEmbKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      <Label className={labelClass}>Model Name</Label>
+                      <Input className={inputClass} autoComplete="off" placeholder="例：BAAI/bge-m3" value={embLocalModel} onChange={(e) => setEmbLocalModel(e.target.value)} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className={labelClass}>本地路径（可选）</Label>
+                      <Input className={inputClass} autoComplete="off" placeholder="例：D:\\models\\bge-m3" value={embLocalPath} onChange={(e) => setEmbLocalPath(e.target.value)} />
+                    </div>
+                    <div className="text-[12px] leading-5 text-dim/80">
+                      需要先安装本地 Embedding 依赖。填写模型名会在首次测试时加载或下载；填写本地路径则直接从该目录加载。
+                    </div>
+                  </>
+                )}
               </div>
             )}
 
