@@ -1,118 +1,155 @@
-# qidian-rehearsal-agent
+<!-- markdownlint-disable MD033 -->
+# 奇点排练 Agent
 
-奇点排练 Agent：面向话剧排练的智能协作平台。
+<p align="center">
+  <img src="qidian-rehearsal-icon.png" alt="奇点排练 Agent" width="112">
+</p>
 
-项目代号是 `qidian`，名字来自“奇点”——剧团的中心，也象征剧本、演员、场记、道具和排练 Agent 汇聚后产生新的创作秩序。
+<h3 align="center">把剧本、演员、资源与现场经验，组织成一套可执行的排练系统。</h3>
 
-## 当前进度
+<p align="center">
+  面向话剧团的可自部署智能协作平台：剧本解读、排练调度、对词训练、舞台可视化与排练复盘，共享同一份可追溯的排练上下文。
+</p>
 
-第一阶段已经打通“剧本解析 Agent”最小闭环：
+<p align="center">
+  <a href="http://qidianagent.vip">在线体验</a> ·
+  <a href="docs/rehearsal-agent.md">产品与架构说明</a> ·
+  <a href="docs/deployment.md">部署指南</a> ·
+  <a href="docs/agent-evaluation.md">Agent 评估集</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/cartonmouse/qidian-rehearsal-agent/actions/workflows/ci.yml"><img src="https://github.com/cartonmouse/qidian-rehearsal-agent/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-CC--BY--NC--4.0-orange.svg" alt="License"></a>
+  <a href="https://github.com/cartonmouse/qidian-rehearsal-agent"><img src="https://img.shields.io/github/stars/cartonmouse/qidian-rehearsal-agent?style=flat" alt="GitHub stars"></a>
+</p>
+
+## 为什么需要奇点排练
+
+排练现场的信息往往分散在剧本、群聊、表格、道具清单和导演的临场决定里。奇点排练把这些信息组织成一个工作上下文：
+
+- 剧本内容可以回到原文行号；
+- Agent 的识别结果可以由导演确认和修改；
+- 演员档期、道具、服装和排练室会参与排班约束；
+- 不能排班时会说明具体原因，而不是只返回“失败”；
+- 舞台布局既可以由 Agent 起草，也可以由导演直接编辑；
+- 每次 Agent 运行、版本变化和现场反馈都能被复盘。
+
+它不是一个只会生成文案的聊天窗口，而是一套围绕排练状态、约束和现场协作设计的工具。
+
+## 功能一览
+
+### 剧本工作台
+
+- 支持 TXT、Markdown 和可提取文本的 PDF；
+- 识别场次、角色、台词、舞台提示、道具和服装需求；
+- 保留来源文件、原文摘录和行号；
+- 支持规则解析、可选 LLM 结构化抽取和单场 fallback；
+- 导演可在人工确认节点修改场次、角色、道具和服装标签。
+
+### 排练调度与自动排班
+
+- 生成场次任务、演员/道具/服装清单和预计时长；
+- 导入或粘贴演员可用时间，支持 CSV/TSV 及表格导出内容；
+- 计算全部演员的共同空闲区间；
+- 将演员、道具、服装、换装缓冲和排练室纳入冲突检查；
+- 把不共享资源的任务分成并行组；
+- 输出缺少档期、没有共同时间、资源不足等未排班原因；
+- 支持导演单条或批量人工覆盖，批量确认采用原子写入。
+
+### 对词、RAG 与舞台
+
+- 原词模式无需模型服务，适应性模式可使用 LLM 生成对方回应；
+- 对词会话保存游标、transcript、角色语气和排练上下文；
+- 剧本问答只检索当前剧本版本，回答引用可回到原文证据；
+- 无证据时停止猜测，语义检索不可用时回退规则检索；
+- 根据舞台提示生成角色、道具和上下场动态；
+- 导演可以新增、重命名、移除、隐藏或拖动人物/道具，并复用用户标签。
+
+### 资源与排练资产
+
+- 道具/服装库存、借出归还、多人分配和容量检查；
+- 排练室预约、配乐时间轴、预算和发票元数据；
+- 场记档案、演员建议收件箱和排练反馈；
+- 版本差异、资源审计、排练度量和 Agent 运行记录；
+- 格言沉淀与宣传文案生成。
+
+## 一次排练如何流动
 
 ```text
-剧本文本 / Markdown / PDF
-        ↓
-摄取并保留原始行号
-        ↓
-识别场次
-        ↓
-并行提取角色、台词、道具、服装需求
-        ↓
-校验与保守修复
-        ↓
-待人工确认：修改场次、角色、道具
-        ↓
-确认后按用户隔离保存结构化排练数据
+剧本 / 档期 / 资源
+        │
+        ▼
+剧本解读 Agent ──► 人工确认 ──► 调度 Agent ──► 自动排班
+        │                              │
+        ├──► 剧本问答 RAG               ├──► 并行任务组
+        ├──► 对词训练                  ├──► 未排班原因
+        └──► 舞台可视化                └──► 人工覆盖与审计
+                                               │
+                                               ▼
+                                  场记 / 反馈 / 版本 / 知识资产
 ```
 
-当前接口会返回每个场次、角色、台词、道具、服装需求和 Agent trace，并为台词、服装候选与场次保留原剧本行号，方便导演人工核对。解析默认使用 `auto` 策略：没有配置 LLM 时走本地可解释规则，配置后按场次并行执行 LLM 结构化抽取；单场调用失败会自动回退规则解析。Embedding 不是剧本解析节点的前置条件。
+这些模块可以独立使用。演员时间池不要求先解析剧本，舞台可视化也不要求把所有任务串成一条流水线；推荐路径只是帮助剧团从文本快速走到一次可执行排练。
 
-解析结果初始状态为 `pending`。导演可以在前端人工确认或修改每场的标题、角色、道具和服装；台词原文与来源行号由服务端保留，LLM 服装候选只有在原文可核对时才会进入结果。审核状态变为 `confirmed` 或 `edited` 后，结果才适合作为后续排练调度的输入。
+## Agent 设计
 
-已确认的剧本可以交给排练调度 Agent，生成每场的演员清单、道具清单、服装清单、预计时长和资源不冲突的并行任务组。服装会同时参与并行冲突判断：同名可用库存数量会合计为并行容量，并扣除当前已借出数量；库存为 2 件且借出 1 件时只剩 1 件可并行，归还后容量恢复，容量不足时在 `parallel_reason` 中解释。库存不存在或状态不可用时按 1 件保守处理并给出可解释 warning，等待人工确认。目前默认产出是正式调度草案；如果导演想先看结果，也可以在人工确认前请求 `preview=true`，系统会返回带 `is_preview=true` 标记的未确认预览，不会把它冒充为正式排练计划。人工确认后重新生成即可得到正式草案。
+奇点排练采用“模型理解 + 确定性约束 + 人工控制”的组合：
 
-当前已接入第一版自动排班：在“演员排练表”中导入 CSV/TSV，或粘贴“演员、日期、开始时间、结束时间”四列数据后，系统寻找一场所需全部演员的最早共同空闲区间，并同步维护道具与服装占用；找不到交集或资源容量不足时保留可解释的未排班原因。并行组中的演员、道具和服装资源不冲突场次可以被安排在同一时间。
+| Agent/模块 | 负责什么 |
+| --- | --- |
+| 剧本解读 Agent | 将开放文本转成带来源证据的场次和排练需求 |
+| 调度 Agent | 生成任务，调用档期/资源工具并解释排班结果 |
+| RAG Agent | 检索当前剧本版本的证据并约束回答 |
+| 对词 Agent | 维护角色、游标、语气和上下文的有状态会话 |
+| Stage Agent | 由舞台提示生成可编辑的导演布局 |
+| 复盘/资源 Agent | 把现场反馈、资源变化和版本影响变成可追踪记录 |
 
-每个调度任务还会记录并展示分组原因：没有共同演员、道具或超出服装库存容量的场次可以进入同一并行组；发生冲突时列出共享资源或容量限制，便于导演解释为什么任务需要错开。
+### 可靠性边界
 
-调度 Agent 还会返回可审计的工具调用链：`inspect_script` 检查人工确认门槛，`extract_scene_requirements` 提取演员/道具/服装/时长，`group_parallel_tasks` 按演员、道具和服装库存容量划分并行组，`find_common_actor_slot` 查找共同档期，最后由 `validate_schedule` 校验已排、未排和冲突数量。工作台会同时展示每次调用的参数摘要、结果和降级状态。
+- **原文优先**：LLM 只提交结构化候选，台词和来源行号重新与原文校验；
+- **结构化输出**：Pydantic 模型检查字段、行号、场次和资源引用；
+- **局部降级**：单场 LLM 失败回退规则解析，语义检索失败回退关键词检索；
+- **约束守门**：共同档期、资源容量、换装间隔和房间冲突由确定性逻辑检查；
+- **证据约束**：RAG 没有证据就停止回答，答案引用必须能回到剧本；
+- **人工可控**：导演可以修改确认结果、人工排班和舞台布局，并保留 Agent 原建议；
+- **可观测**：运行记录保存步骤、工具调用、耗时、状态和降级原因。
 
-档期导入兼容 Excel、WPS 和 Google Sheets 导出的表格。前端提供模板下载、行级格式校验和导入预览，也兼容制表符或竖线分隔的粘贴内容；确认预览后点击“保存档期”，时间池即可被不同剧本重复使用。
+LLM 和 Embedding 都是可选服务。没有模型 API 时，剧本规则解析、调度、自动排班、原词对词、规则 RAG、舞台可视化、资源管理和反馈归档仍可运行。
 
-第一版对词 Agent 已接入侧栏“对词训练”：可以选择剧本、场次和角色，按“原词模式”逐句练习，也可以选择“适应性模式”让 LLM 根据演员临场表达生成对方回应。原词模式不需要模型服务；适应性模式在 LLM 未配置或调用失败时自动回退到原台词，并保留来源行号。对词页面还支持角色语气约束和本轮排练上下文；后端会保存游标、完整 transcript、引擎统计、语气、上下文和下一句原词，续接时把最近 8 条记录传给适应性 Agent；后端不会信任客户端跳跃提交的 `line_index`，也不会允许中途更换同一会话的排练意图。
+## 技术架构
 
-排练复盘已经接入侧栏“排练复盘”：一次排练可以独立记录日期、参与者、具体产出和原始反馈；镜子 Agent 会生成总结、已形成的亮点、待解决的阻塞项和下一步动作。它支持本地规则、LLM 和无模型降级三种路径，并完整保留原始笔记。
+| 层 | 技术与职责 |
+| --- | --- |
+| Web | React、Vite、Tailwind CSS、Radix UI |
+| API | Python 3.11+、FastAPI、Pydantic |
+| Agent | 显式状态编排、并行节点、工具调用、结构化输出、校验与 fallback |
+| RAG | 当前剧本版本内的 source_line 证据检索 |
+| Storage | SQLite 保存账号与索引，JSON 保存用户领域数据 |
+| Providers | OpenAI-compatible LLM/Embedding，可选本地 SentenceTransformer |
+| Deploy | Docker Compose、Nginx、Uvicorn |
+| Quality | Python 回归测试、离线 Agent 评估、前端检查和 CI |
 
-排练度量已经接入侧栏“排练度量”：按最近 7/30/90 天聚合已归档的排练次数、具体产出、亮点、阻塞、下一步、参与者和 Agent 路径，提供活动趋势、高频亮点/阻塞和最近记录。指标是确定性统计，不把有限反馈包装成未经证实的“排练质量分数”。
+## 快速开始
 
-版本追踪已经接入侧栏“版本追踪”：选择两个已保存的剧本版本后，版本差异 Agent 会按场次编号对齐，标记新增/删除场次、角色和道具变化，以及带原始行号的新增、删除和修改台词；响应还会生成下游影响提醒，明确哪些排班、对词进度和资源结论需要人工复核。资源影响会进一步匹配当前用户近期的资源审计记录，并把场次、道具和审计记录一起带入资源复核入口。
+### 环境要求
 
-舞台可视化已经接入侧栏“舞台可视化”：Stage Agent 会读取场景中的角色、道具、舞台提示和台词行号，生成角色头像调度地图，以及按原文顺序排列的上场、下场、走位、道具和台词事件。没有明确位置的对象会标记为待人工确认。导演可以进入“编辑布局”模式，在“场次标签编辑”中新增、改名、移除人物/道具，或从用户已有标签库复用；也可以拖动角色/道具、循环切换演员在场状态，并用眼睛按钮把本场暂时不需要的角色或道具隐藏。保存的是当前用户对本剧本版本本场的人工覆盖，Agent 原始建议仍保留，并可随时恢复。标签变更、移除和临时隐藏只影响本场布局，不会删除剧本原文、台词、事件或 Agent 证据。
+- Python 3.11+
+- Node.js 18+
+- Git
 
-资源管理已经接入侧栏“资源管理”：可以独立维护道具/服装库存，登记服装借出、多人分配、按记录部分归还/全部归还，查看逾期或临近归还提醒，预约排练室并拒绝同房间的时间重叠；选择剧本和场次后，Resource Agent 会逐项比较剧本道具需求与可用库存，输出“已就绪 / 维修中 / 缺失”及具体原因。资源变更 Agent 会保留库存借还、预约、配乐、预算和发票的结构化变更摘要；资源时间线支持按类型、变更动作和关键词筛选。剧本解析 Agent 会从明确的穿着/服装词中抽取服装需求，LLM 候选必须通过原文匹配，导演可在人工确认节点修正；调度 Agent 再把需求与服装库存快照对照，区分未匹配、库存不可用和已借出容量。
-
-音乐与预算已经接入侧栏“音乐与预算”：可以记录配乐进入/转场/收尾的秒级时间轴笔记，维护预算项目和实际金额，登记发票元数据并关联预算项目。Resource Finance Agent 会分开统计预算、实际、发票和已核验金额，提示超支、待核验和未关联发票，不自动把发票当成已付款事实。
-
-场记档案已经接入侧栏“场记档案”：场记可以独立记录导演指令、演员状态、走位、道具和声音变化，也可以关联剧本、场次和原文行号。Logbook Agent 会保留现场原话，只补充分类标签和可回看的剧本上下文，不会覆盖导演记录。
-
-演员建议收件箱已经接入侧栏“建议收件箱”：演员可以提交表演、走位、剧本、协作和安全建议，导演可以在同一条记录上更新处理状态并留下回应。Suggestion Agent 只根据明确的安全、受伤、设备故障等词标记高优先级，不替演员改写建议内容。
-
-知识资产已经接入侧栏“知识资产”：格言表会保留演员或导演提交的原文，只补充主题标签、剧本上下文和收藏状态；宣传文案 Agent 会根据作品名、场次标题、角色名和宣传 brief 生成标题、短文案、长文案与话题标签。生成支持 `auto`、`rules`、`llm` 三种模式，没有 API Key 或 LLM 调用失败时自动回退到本地规则，并在响应中说明依据，不虚构演出时间、地点或剧情。
-
-剧本问答 RAG Agent 已接入侧栏“剧本问答”：它只在当前用户选中的剧本版本内检索场次上下文、台词和舞台提示，并为每条证据保留场次、来源类型、原文行号和匹配原因。规则检索不需要模型服务；可选语义检索需要 Embedding，回答组织可选 LLM。没有命中证据时，回答器会明确停止猜测。
-
-Agent 运行记录已经接入侧栏“Agent运行记录”：剧本解析、调度草案、自动排班、对词、资源检查和剧本问答都会保存结构化摘要、运行模式、步骤 trace、耗时和降级原因；调度草案与自动排班还会通过 `parent_run_id` / `root_run_id` 组成可回看的运行链。页面额外聚合最近 30 天的失败率、降级率、按 Agent 统计和 failed step。LLM 调用只对连接超时、限流和 5xx 等可重试错误最多尝试 2 次，业务写入不自动重试。
-
-Agent 评估集已经接入仓库：`evals/rehearsal_cases.json` 覆盖剧本解析、可行排班、调度工具调用链与父子 Run 关联、未排班原因与替代方案、资源状态、服装借还和容量扣除、带证据/拒答的 RAG 路径、对词会话恢复，以及用确定性 mock provider 验证 LLM 结构化解析、原文锚定、角色语气、上下文记忆和适应性对词合同；`python -m evals.run_rehearsal_evals` 可以在没有真实模型服务的情况下输出逐项 JSON 报告，后端回归测试和 CI 会执行同一套评估。
-
-演员可用时间现在作为独立的“演员时间池”保存，不要求先解析剧本；排班 Agent 在生成任务后读取这组可复用档期。工作台仍提供“预览调度（未确认）”入口，方便先观察结果，再决定是否进行人工确认。
-
-前端侧栏目前聚焦剧团使用场景：`排练工作台`负责剧本解析与人工确认，`演员排练表`负责独立维护演员档期、生成场次任务和自动排班，`对词训练`负责逐句排练，`排练复盘`负责反馈归档，`排练度量`负责聚合进度信号，`场记档案`负责现场知识沉淀，`建议收件箱`负责演员意见流转，`知识资产`负责格言沉淀和宣传文案生成，`版本追踪`负责版本差异核对，`舞台可视化`负责走位和上下场核对，`资源管理`负责库存、排练室和排练前资源检查，`音乐与预算`负责配乐时间轴、预算和发票元数据。原项目的面试训练类入口已从主导航移除，相关旧路由暂时保留以避免破坏基础项目代码。
-
-## Agent 能力路线
-
-- 已完成：剧本解析、人工确认、版本追踪与带证据回指的 RAG 问答
-- 已完成：排练调度、并行任务分组、演员时间池、自动排班、冲突优先级和候选替代方案
-- 已完成：对词 Agent MVP、舞台可视化、资源检查、场记、复盘和建议收件箱
-- 已完成：格言表与宣传文案 Agent，支持规则/LLM/降级路径
-- 已完成：反馈度量面板，统计窗口、趋势、高频问题和 Agent 路径均可回溯
-- 已完成：配乐时间轴、预算与发票元数据，以及预算/票据风险解释
-- 已完成：核心 Agent 运行记录、步骤 trace、降级原因和用户隔离回看
-- 已完成：GitHub Actions CI、Docker Compose 配置检查和面试演示材料收口
-- 已完成：版本差异下游影响提醒，支持调度、对词和资源复核入口
-- 已完成：资源变更审计、Agent 失败指标和有上限的 LLM 重试可观测性
-- 已完成：资源审计与版本复核动作串联，资源时间线支持类型、变更动作和关键词筛选
-- 已完成：无外部 API 依赖的 Agent 评估集，覆盖解析、排班、资源检查和 RAG 证据回指
-- 已完成：调度 Agent 工具调用序列、参数/结果展示，以及对词 Agent 的持久化会话游标和 transcript
-- 已完成：评估集覆盖调度工具调用链与对词会话恢复边界
-- 已完成：调度草案与自动排班共享根 Run，并在 Agent运行记录页展示关联运行链
-- 已完成：无共同档期时的分组/缩短/补档建议，以及导演人工覆盖排班
-- 已完成：批量排班确认、原子写入和共享资源冲突校验
-- 已完成：生成调度草案时读取配乐时间轴、预算、发票和服装库存快照，保留资源检查工具调用、预算/票据/服装风险 warning，并在自动排班时占用道具/服装容量
-- 已完成：从规则/LLM 原文中抽取服装需求，支持人工确认、原文行号、任务资源冲突和库存匹配 warning
-- 已完成：版本追踪会识别新增/移除服装，生成资源复核影响，并把服装变化与近期库存审计关联
-- 已完成：服装换装缓冲配置、同演员服装变化的自动排班间隔、批量确认冲突解释和离线评估
-- 已完成：服装借还状态、持有人/场次/预计归还信息、借出/归还审计动作，以及借出容量对调度 Agent 的下游影响
-- 已完成：服装逾期、临近归还和缺少归还期限的确定性提醒 Agent，以及用户级查询接口和资源页告警展示
-- 已完成：服装多人借用分配、按 `custody_id` 定向归还、聚合容量扣除和多持有人可解释展示
-- 待继续：补充更多真实剧本样本，并把借还提醒、调度容量与真实演出流程联动
-
-## 技术栈
-
-- Backend：Python、FastAPI、Pydantic、SQLite/文件存储
-- Agent：显式状态编排、并行节点、结构化 LLM 输出、校验与降级
-- RAG：剧本版本内的 `source_line` 证据检索，支持规则/可选语义与用户隔离
-- Frontend：React、Vite、Tailwind CSS、Radix UI
-- Deployment：Docker Compose
-
-## 本地启动
+### 本地开发
 
 ```bash
-copy .env.example .env
+# Windows PowerShell
+Copy-Item .env.example .env
+# macOS / Linux
+cp .env.example .env
 pip install -r requirements.txt
 uvicorn backend.main:app --reload --port 18000
 ```
 
-前端：
+另开终端启动前端：
 
 ```bash
 cd frontend
@@ -120,73 +157,165 @@ npm install
 npm run dev
 ```
 
-示例剧本位于 [`docs/examples/qidian-demo-script.md`](docs/examples/qidian-demo-script.md) 和 [`docs/examples/qidian-echo-room-script.md`](docs/examples/qidian-echo-room-script.md)。
-演员档期主路径样例位于 [`docs/examples/qidian-actor-availability-feasible.csv`](docs/examples/qidian-actor-availability-feasible.csv)；[`docs/examples/qidian-actor-availability.csv`](docs/examples/qidian-actor-availability.csv) 保留了无共同时间的冲突样例。
-完整演示步骤、面试讲解话术和提交前验证清单位于 [`docs/demo-and-interview.md`](docs/demo-and-interview.md)。
-Agent 评估集说明和面试讲解要点位于 [`docs/agent-evaluation.md`](docs/agent-evaluation.md)。
-完整环境变量、Docker 和线上安全注意事项见 [`docs/deployment.md`](docs/deployment.md)。
-提交到 GitHub 后，`.github/workflows/ci.yml` 会自动执行后端回归、前端类型/单测/lint/build 和 Docker Compose 配置检查。
+打开 http://localhost:5173。
 
-## 第一阶段 API
+### Docker
 
-需要先登录取得 Bearer Token：
+```bash
+docker compose up --build
+```
 
-- `POST /api/rehearsal/scripts/parse`：解析 JSON 中的 `title`、`version_label`、`script_text`；可选 `analysis_mode`：`auto`、`rules`、`llm`
-- `POST /api/rehearsal/scripts/parse-file`：解析 `.txt`、`.md`、`.markdown` 或可提取文本的 `.pdf`；可选查询参数 `analysis_mode`
-- `GET /api/rehearsal/scripts`：列出当前用户的剧本解析结果
-- `GET /api/rehearsal/scripts/{script_id}`：读取单个解析结果
-- `PUT /api/rehearsal/scripts/{script_id}/review`：提交人工确认或场次元数据修改
-- `GET /api/rehearsal/availability`：读取当前用户的演员时间池
-- `PUT /api/rehearsal/availability`：保存或替换当前用户的演员时间池
-- `POST /api/rehearsal/scripts/{script_id}/schedule/draft`：生成排练调度草案；请求体可传 `{"default_minutes": 45, "preview": true}` 生成未确认预览
-- `GET /api/rehearsal/scripts/{script_id}/schedule`：读取最近一次调度草案
-- `POST /api/rehearsal/scripts/{script_id}/schedule/plan`：根据演员可用时间生成自动排班结果
-- `POST /api/rehearsal/scripts/{script_id}/schedule/override`：保存导演确认的单个人工覆盖时段；可选 `room_name` 会触发排练室预约检查，并保留审计轨迹
-- `POST /api/rehearsal/scripts/{script_id}/schedule/override-batch`：原子确认多个排班时段；任一任务无效、已人工确认、排练室不可用或与共享演员/道具/服装容量冲突时整批拒绝，不产生半成品
-- `POST /api/rehearsal/scripts/{script_id}/line-reading`：推进一轮角色对词；支持 `strict` 和 `adaptive` 模式
-- `GET /api/rehearsal/scripts/{script_id}/line-reading/sessions/{session_id}`：恢复当前用户的对词游标、transcript 和下一句原词
-- `POST /api/rehearsal/scripts/{script_id}/rag`：在当前剧本版本内检索证据并回答问题；支持 `rules`/`semantic` 检索和 `auto`/`rules`/`llm` 回答
-- `GET /api/rehearsal/agent-runs?limit=50`：读取当前用户最近的 Agent 运行摘要和结构化 trace
-- `GET /api/rehearsal/agent-runs/{run_id}`：读取单次 Agent 运行详情
-- `POST /api/rehearsal/feedback`：归档一次排练反馈并生成镜像总结；可不关联剧本
-- `GET /api/rehearsal/feedback`：读取当前用户的排练反馈档案
-- `GET /api/rehearsal/feedback/metrics?days=30`：统计当前用户在窗口内的排练产出、阻塞、下一步和 Agent 路径
-- `GET /api/rehearsal/feedback/{record_id}`：读取单条反馈档案
-- `POST /api/rehearsal/scripts/{script_id}/diff`：将目标版本与请求体中的 `compare_script_id` 做结构化差异比较，并匹配当前用户的相关资源审计记录
-- `GET /api/rehearsal/scripts/{script_id}/stage/{scene_id}`：生成单个场次的舞台地图和动态事件
-- `GET/POST /api/rehearsal/stage-tags`：读取或新增当前用户可复用的人物/道具标签
-- `PUT /api/rehearsal/scripts/{script_id}/stage/{scene_id}`：以 `replace_lists=true` 保存导演对本场角色/道具标签、位置、角色在场状态和可见性的完整人工覆盖；缺少的标签会从本场布局移除，新增标签会进入用户复用库；`visible=false` 表示暂时隐藏，不删除源数据
-- `DELETE /api/rehearsal/scripts/{script_id}/stage/{scene_id}/override`：删除本场人工覆盖并恢复 Agent 建议
-- `GET/PUT /api/rehearsal/resources/inventory`：读取或替换当前用户的道具/服装库存
-- `GET /api/rehearsal/resources/audit?limit=50&resource_type=inventory&change_type=updated&query=椅子`：读取并筛选资源变更审计
-- `GET /api/rehearsal/resources/rooms`：读取当前用户的排练室预约
-- `POST /api/rehearsal/resources/rooms`：创建排练室预约；同房间同日期的重叠时间返回 `409`
-- `DELETE /api/rehearsal/resources/rooms/{booking_id}`：取消排练室预约
-- `POST /api/rehearsal/scripts/{script_id}/resources/check`：按剧本或单场检查道具库存就绪情况
-- `GET/PUT /api/rehearsal/resources/music`：读取或替换配乐时间轴笔记
-- `GET/PUT /api/rehearsal/resources/budget`：读取或替换制作预算项目
-- `GET/PUT /api/rehearsal/resources/invoices`：读取或替换发票元数据
-- `GET /api/rehearsal/resources/finance-summary`：返回预算、实际、发票关联和风险提示汇总
-- `POST /api/rehearsal/logbook`：归档一条场记，可选关联剧本、场次和原文行号
-- `GET /api/rehearsal/logbook`：读取当前用户的场记档案
-- `DELETE /api/rehearsal/logbook/{log_id}`：删除一条场记记录
-- `POST /api/rehearsal/suggestions`：提交一条演员建议，可选关联剧本和场次
-- `GET /api/rehearsal/suggestions`：读取当前用户的建议收件箱
-- `PATCH /api/rehearsal/suggestions/{suggestion_id}`：更新建议状态和导演回应
-- `DELETE /api/rehearsal/suggestions/{suggestion_id}`：删除一条建议
-- `POST /api/rehearsal/knowledge/mottos`：保存一条格言，可选关联剧本和场次
-- `GET /api/rehearsal/knowledge/mottos`：读取当前用户的格言表
-- `PATCH /api/rehearsal/knowledge/mottos/{motto_id}`：更新格言收藏状态
-- `DELETE /api/rehearsal/knowledge/mottos/{motto_id}`：删除一条格言
-- `POST /api/rehearsal/knowledge/promo`：根据作品信息和可选剧本结构生成并保存宣传文案
-- `GET /api/rehearsal/knowledge/promo`：读取当前用户的历史宣传文案
+打开 http://localhost。容器会提供前端、API 反向代理和 /health 健康检查。
 
-## 基础项目与许可
+## 模型服务配置
 
-本项目基于 [AnnaSuSu/TechSpar](https://github.com/AnnaSuSu/TechSpar) 的干净 Python/FastAPI 历史基线建立，保留其原始 [CC BY-NC 4.0](LICENSE) 许可与致谢信息，并在此基础上进行话剧排练领域的增删改。新代码和文档的改动以本仓库提交记录为准。
+项目可以先以规则模式运行，再按需接入模型：
 
-请勿将 `.env`、`data/users/`、个人剧本、API Key 或其他运行时数据提交到公开仓库。
+- LLM 用于适应性对词、LLM 复盘、宣传文案和 RAG 答案组织；
+- Embedding 用于剧本语义检索；
+- 本地 Embedding 支持 HuggingFace/SentenceTransformer 模型和本地路径；
+- 模型设置可以在登录后的设置页按用户保存；
+- 不要把 API Key、.env、个人剧本或 data/users/ 提交到 Git。
 
-## 项目仓库
+OpenAI-compatible LLM 示例：
 
-[github.com/cartonmouse/qidian-rehearsal-agent](https://github.com/cartonmouse/qidian-rehearsal-agent)
+```env
+API_BASE=https://your-provider.example/v1
+API_KEY=your-api-key
+MODEL=your-model
+```
+
+远程 Embedding 示例：
+
+```env
+EMBEDDING_BACKEND=api
+EMBEDDING_API_BASE=https://your-embedding-provider.example/v1
+EMBEDDING_API_KEY=your-embedding-key
+EMBEDDING_API_MODEL=your-embedding-model
+```
+
+完整环境变量、本地模型依赖和线上安全配置见 docs/deployment.md。
+
+## 示例数据
+
+- [示例剧本：奇点排练](docs/examples/qidian-demo-script.md)
+- [示例剧本：回声室](docs/examples/qidian-echo-room-script.md)
+- [可排班演员档期](docs/examples/qidian-actor-availability-feasible.csv)
+- [无共同时间的冲突档期](docs/examples/qidian-actor-availability.csv)
+
+推荐体验路径：
+
+1. 上传示例剧本并运行剧本解读 Agent；
+2. 在人工确认中调整一个角色或道具；
+3. 导入演员档期，生成调度草案并运行自动排班；
+4. 在舞台可视化中编辑一个标签；
+5. 用剧本问答、对词和 Agent 运行记录检查结果。
+
+## API 入口
+
+所有排练 API 都需要当前用户的 Bearer Token。常用接口包括：
+
+| 能力 | API |
+| --- | --- |
+| 解析剧本 | POST /api/rehearsal/scripts/parse、POST /api/rehearsal/scripts/parse-file |
+| 人工确认 | PUT /api/rehearsal/scripts/{script_id}/review |
+| 演员时间池 | GET/PUT /api/rehearsal/availability |
+| 调度草案 | POST /api/rehearsal/scripts/{script_id}/schedule/draft |
+| 自动排班 | POST /api/rehearsal/scripts/{script_id}/schedule/plan |
+| 剧本问答 | POST /api/rehearsal/scripts/{script_id}/rag |
+| 对词会话 | POST /api/rehearsal/scripts/{script_id}/line-reading |
+| 舞台布局 | GET/PUT /api/rehearsal/scripts/{script_id}/stage/{scene_id} |
+| 资源检查 | POST /api/rehearsal/scripts/{script_id}/resources/check |
+| Agent 运行记录 | GET /api/rehearsal/agent-runs |
+
+完整接口以运行中的 FastAPI OpenAPI 文档为准：
+
+- http://localhost:18000/docs
+- http://localhost:18000/openapi.json
+
+## 数据与隐私
+
+```text
+data/
+├── interviews.db
+└── users/
+    └── <uid>/
+        ├── provider.json
+        └── rehearsal/
+            ├── scripts/
+            ├── schedules/
+            ├── agent-runs/
+            ├── stage-overrides/
+            ├── stage-tags.json
+            ├── line-reading-sessions/
+            ├── availability.json
+            └── resources/
+```
+
+账号和索引写入 SQLite，用户领域数据按 uid 写入 JSON 和目录。公开部署时请使用自己的 JWT 密钥，关闭或保护开放注册，并为数据目录配置备份和访问权限。公共演示环境不适合上传未公开剧本、个人信息或真实密钥。
+
+## 质量检查
+
+```bash
+python -m compileall -q backend
+python -m evals.run_rehearsal_evals
+
+cd frontend
+npm run typecheck
+npm test
+npm run lint
+npm run build
+
+docker compose config
+```
+
+离线评估集不依赖真实 LLM 或 Embedding，重点验证剧本来源锚定、调度约束、工具调用链、RAG 证据/拒答、对词会话恢复和用户隔离。
+
+## 项目结构
+
+```text
+backend/
+├── rehearsal/        剧本、调度、RAG、对词和舞台领域服务
+├── routers/          FastAPI 路由
+├── storage/          用户设置与持久化
+└── app.py            应用组装与健康检查
+frontend/
+├── src/components/   排练工作台与领域组件
+├── src/api/          前后端接口
+└── public/           奇点图标与静态资源
+evals/                离线 Agent 评估案例
+docs/                 产品、部署、评估与领域说明
+deploy/               公开服务 Docker/Nginx 配置
+```
+
+## 文档
+
+- [排练 Agent 设计说明](docs/rehearsal-agent.md)
+- [Agent 评估集](docs/agent-evaluation.md)
+- [部署指南](docs/deployment.md)
+- [外部服务配置](docs/external-services.md)
+
+## Roadmap
+
+- 演员档期确认通知与日历同步；
+- 更完整的多人协同编辑和权限角色；
+- PostgreSQL、对象存储和异步任务队列；
+- 语音对词、发音反馈和情绪练习；
+- 更强的剧本版本合并与排练影响分析；
+- 多房间、多剧组的并发排练管理。
+
+## 参与贡献
+
+欢迎通过 Issue 反馈真实排练场景、数据格式和体验问题，也欢迎提交 Pull Request。贡献前请先运行质量检查，并避免提交个人剧本、账号数据、模型密钥和本地缓存。
+
+## 独立项目与许可
+
+奇点排练 Agent 是面向话剧排练场景维护的独立项目。项目早期复用了 [TechSpar](https://github.com/AnnaSuSu/TechSpar) 的 Python/FastAPI 工程基线和部分通用基础设施；当前产品名称、领域模型、排练工作流、Agent 能力和前端主导航均围绕话剧排练独立演进。历史基线说明见 docs/adr/0001-clean-python-derived-base.md。
+
+本项目遵循仓库中的 [CC BY-NC 4.0](LICENSE) 许可。使用或二次开发时请同时遵守上游依赖和素材各自的许可条款。
+
+## 项目链接
+
+- 在线体验：http://qidianagent.vip
+- GitHub：https://github.com/cartonmouse/qidian-rehearsal-agent
+- 剧团名称：奇点
