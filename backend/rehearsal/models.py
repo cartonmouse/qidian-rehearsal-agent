@@ -1224,12 +1224,40 @@ class StageActor(BaseModel):
     status: Literal["onstage", "offstage", "unknown"]
     position: StagePosition = "unknown"
     source_lines: list[int] = Field(default_factory=list)
+    # Agent means the label came from the script analysis; manual labels are
+    # scene-local director additions or renamed display labels.
+    origin: Literal["agent", "manual"] = "agent"
+    # False means temporarily hidden from this scene's director layout; it
+    # never removes the actor from the parsed script or Agent evidence.
+    visible: bool = True
 
 
 class StageProp(BaseModel):
     name: str
     position: StagePosition = "unknown"
     source_lines: list[int] = Field(default_factory=list)
+    origin: Literal["agent", "manual"] = "agent"
+    # False means temporarily hidden from this scene's director layout.
+    visible: bool = True
+
+
+class StageTag(BaseModel):
+    """A reusable user-scoped character or prop label."""
+
+    tag_id: str
+    kind: Literal["actor", "prop"]
+    name: str = Field(min_length=1, max_length=80)
+    created_at: str
+
+
+class StageTagCreateRequest(BaseModel):
+    kind: Literal["actor", "prop"]
+    name: str = Field(min_length=1, max_length=80)
+
+
+class StageTagCatalog(BaseModel):
+    actors: list[StageTag] = Field(default_factory=list)
+    props: list[StageTag] = Field(default_factory=list)
 
 
 class StageEvent(BaseModel):
@@ -1250,6 +1278,31 @@ class StageVisualization(BaseModel):
     events: list[StageEvent] = Field(default_factory=list)
     summary: str
     warnings: list[str] = Field(default_factory=list)
+    # Keep the Agent proposal alongside the currently displayed layout so a
+    # director can compare a human override with the source-backed suggestion.
+    agent_actors: list[StageActor] = Field(default_factory=list)
+    agent_props: list[StageProp] = Field(default_factory=list)
+    human_overrides_applied: bool = False
+    human_edited_at: str | None = None
+
+
+class StageLayoutUpdateRequest(BaseModel):
+    """导演提交的一场戏的角色/道具布局覆盖。"""
+
+    actors: list[StageActor] = Field(default_factory=list)
+    props: list[StageProp] = Field(default_factory=list)
+    # New clients send a complete scene snapshot so a director can add,
+    # rename, or remove labels. False preserves the old partial-overlay
+    # behavior for already persisted overrides and older clients.
+    replace_lists: bool = False
+
+
+class StageLayoutOverride(StageLayoutUpdateRequest):
+    """按用户、剧本版本和场次持久化的导演布局。"""
+
+    script_id: str
+    scene_id: str
+    updated_at: str
 
 
 class ScheduleToolCall(BaseModel):

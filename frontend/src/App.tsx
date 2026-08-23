@@ -10,7 +10,6 @@ import Login from "./pages/Login";
 import Interview from "./pages/Interview";
 import Review from "./pages/Review";
 import History from "./pages/History";
-import Profile from "./pages/Profile";
 import Knowledge from "./pages/Knowledge";
 import TopicDetail from "./pages/TopicDetail";
 import Graph from "./pages/Graph";
@@ -63,14 +62,14 @@ function ProviderGate({ children }: { children: ReactNode }) {
 function PublicHome() {
   const { token, loading } = useAuth();
   if (loading) return null;
-  if (token) return <Navigate to="/profile" replace />;
+  if (token) return <Navigate to="/rehearsal" replace />;
   return <Navigate to="/login" replace />;
 }
 
 function AuthPage() {
   const { token, loading } = useAuth();
   if (loading) return null;
-  if (token) return <Navigate to="/" replace />;
+  if (token) return <Navigate to="/rehearsal" replace />;
   return <Login />;
 }
 
@@ -100,7 +99,8 @@ function AppRoutes() {
                 <Route path="/interview/:sessionId" element={<Interview />} />
                 <Route path="/review/:sessionId" element={<Review />} />
                 <Route path="/history" element={<History />} />
-                <Route path="/profile" element={<Profile />} />
+                {/* The inherited TechSpar profile dashboard is not part of qidian. */}
+                <Route path="/profile" element={<Navigate to="/rehearsal" replace />} />
                 <Route path="/personal-agent" element={<PersonalAgent />} />
                 <Route path="/rehearsal" element={<RehearsalStudio />} />
                 <Route path="/rehearsal/rag" element={<ScriptRag />} />

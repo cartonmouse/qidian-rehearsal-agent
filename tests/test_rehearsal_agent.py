@@ -20,7 +20,17 @@ from backend.rehearsal.rag_agent import ScriptRagAgent
 from backend.rehearsal.resource_agent import CostumeCustodyAgent, ResourceAgent, ResourceAuditAgent, room_booking_conflicts
 from backend.rehearsal.run_log import outcome_status, record_agent_run
 from backend.rehearsal.run_metrics import AgentRunMetricsAgent
-from backend.rehearsal.storage import get_agent_run, list_agent_runs, list_resource_audits, save_resource_audit
+from backend.rehearsal.storage import (
+    delete_stage_override,
+    get_agent_run,
+    get_stage_override,
+    list_stage_tags,
+    list_agent_runs,
+    list_resource_audits,
+    save_resource_audit,
+    save_stage_override,
+    save_stage_tag,
+)
 from backend.rehearsal.suggestion_agent import SuggestionInboxAgent
 from backend.rehearsal.models import (
     AvailabilitySlot,
@@ -45,6 +55,9 @@ from backend.rehearsal.models import (
     RoomBookingRequest,
     Scene,
     ScheduleOverrideRequest,
+    StageActor,
+    StageLayoutOverride,
+    StageTag,
     ScriptAnalysis,
     SourceSpan,
     SuggestionRequest,
@@ -1233,6 +1246,127 @@ def test_stage_agent_keeps_stage_direction_source_and_builds_actor_prop_events()
     assert view.events[0].event_type == "entrance"
     assert any(event.event_type == "prop" for event in view.events)
     assert any(event.event_type == "exit" for event in view.events)
+
+
+def test_stage_agent_applies_director_override_and_keeps_agent_snapshot():
+    analysis = ScriptAnalysisAgent().run(
+        title="导演布局测试",
+        version_label="v1",
+        script_text="第一场\n（小林从舞台左侧上场，拿起椅子。）\n小林：开始。",
+    )
+    scene = analysis.scenes[0]
+    view = StageVisualizationAgent().render(analysis, scene.scene_id)
+    actor = next(item for item in view.actors if item.name == "小林")
+    prop = next(item for item in view.props if item.name == "椅子")
+
+    override = StageLayoutOverride(
+        script_id=analysis.script_id,
+        scene_id=scene.scene_id,
+        actors=[actor.model_copy(update={
+            "position": "downstage_right",
+            "status": "offstage",
+            "visible": False,
+        })],
+        props=[prop.model_copy(update={
+            "position": "downstage_center",
+            "visible": False,
+        })],
+        updated_at="2026-08-25T12:00:00+00:00",
+    )
+    updated = StageVisualizationAgent.apply_override(view, override)
+
+    updated_actor = next(item for item in updated.actors if item.name == "小林")
+    updated_prop = next(item for item in updated.props if item.name == "椅子")
+    agent_actor = next(item for item in updated.agent_actors if item.name == "小林")
+
+    assert updated_actor.position == "downstage_right"
+    assert updated_actor.status == "offstage"
+    assert updated_actor.visible is False
+    assert updated_prop.position == "downstage_center"
+    assert updated_prop.visible is False
+    assert agent_actor.position == "center_left"
+    assert agent_actor.visible is True
+    agent_prop = next(item for item in updated.agent_props if item.name == "椅子")
+    assert agent_prop.visible is True
+    assert updated.human_overrides_applied is True
+    assert updated.human_edited_at == "2026-08-25T12:00:00+00:00"
+
+
+def test_stage_agent_supports_full_scene_label_edits_and_manual_labels():
+    analysis = ScriptAnalysisAgent().run(
+        title="场次标签编辑测试",
+        version_label="v1",
+        script_text="第一场\n（小林从舞台左侧上场，拿起椅子。）\n小林：开始。",
+    )
+    scene = analysis.scenes[0]
+    view = StageVisualizationAgent().render(analysis, scene.scene_id)
+    override = StageLayoutOverride(
+        script_id=analysis.script_id,
+        scene_id=scene.scene_id,
+        actors=[StageActor(
+            name="新演员",
+            status="unknown",
+            position="unknown",
+            origin="manual",
+        )],
+        props=[],
+        replace_lists=True,
+        updated_at="2026-08-25T12:00:00+00:00",
+    )
+
+    updated = StageVisualizationAgent.apply_override(view, override)
+
+    assert [item.name for item in updated.actors] == ["新演员"]
+    assert updated.actors[0].origin == "manual"
+    assert updated.props == []
+    assert [item.name for item in updated.agent_actors] == ["小林"]
+    assert [item.name for item in updated.agent_props] == ["椅子"]
+
+
+def test_stage_override_storage_is_user_and_scene_isolated():
+    override = StageLayoutOverride(
+        script_id="a" * 32,
+        scene_id="scene-1",
+        actors=[],
+        props=[],
+        updated_at="2026-08-25T12:00:00+00:00",
+    )
+    with TemporaryDirectory() as temp_dir, patch.object(settings, "base_dir", Path(temp_dir)):
+        save_stage_override(override, user_id="director-1")
+
+        loaded = get_stage_override(override.script_id, override.scene_id, user_id="director-1")
+        other_user = get_stage_override(override.script_id, override.scene_id, user_id="director-2")
+
+        assert loaded == override
+        assert other_user is None
+        delete_stage_override(override.script_id, override.scene_id, user_id="director-1")
+        assert get_stage_override(override.script_id, override.scene_id, user_id="director-1") is None
+
+
+def test_stage_tag_storage_is_user_isolated_and_deduplicated():
+    with TemporaryDirectory() as temp_dir, patch.object(settings, "base_dir", Path(temp_dir)):
+        first = save_stage_tag(
+            StageTag(
+                tag_id="a" * 32,
+                kind="prop",
+                name="椅子",
+                created_at="2026-08-25T12:00:00+00:00",
+            ),
+            user_id="director-1",
+        )
+        duplicate = save_stage_tag(
+            StageTag(
+                tag_id="b" * 32,
+                kind="prop",
+                name=" 椅子 ",
+                created_at="2026-08-26T12:00:00+00:00",
+            ),
+            user_id="director-1",
+        )
+
+        assert duplicate.tag_id == first.tag_id
+        assert [tag.name for tag in list_stage_tags(user_id="director-1")] == ["椅子"]
+        assert list_stage_tags(user_id="director-2") == []
 
 
 def test_resource_agent_explains_ready_maintenance_and_missing_props():

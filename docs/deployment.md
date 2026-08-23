@@ -98,7 +98,7 @@ LOCAL_EMBEDDING_PATH=
 
 ```bash
 pip install -r requirements.txt
-uvicorn backend.main:app --reload --port 8000
+uvicorn backend.main:app --reload --port 18000
 ```
 
 前端：
@@ -119,15 +119,15 @@ http://localhost:5173
 
 ```powershell
 # 终端一：后端
-uvicorn backend.main:app --host 127.0.0.1 --port 8001
+uvicorn backend.main:app --host 127.0.0.1 --port 18000
 
 # 终端二：前端（在仓库根目录执行）
-$env:TECHSPAR_API_TARGET = "http://127.0.0.1:8001"
+$env:QIDIAN_API_TARGET = "http://127.0.0.1:18000"
 Set-Location frontend
 npm run dev -- --host 127.0.0.1 --port 5181
 ```
 
-打开 `http://127.0.0.1:5181` 后，若仍提示结构字段缺失，先检查 `http://127.0.0.1:8001/openapi.json` 是否来自当前仓库，再清理旧的 Vite 页面或切换到上述隔离端口。前端会对缺少的数组字段做安全归一化，并在剧本解读结果中保留版本错配提醒；这只是兼容旧服务的保护，不会替代后端升级。
+打开 `http://127.0.0.1:5181` 后，若仍提示结构字段缺失，先检查 `http://127.0.0.1:18000/openapi.json` 是否来自当前仓库，再清理旧的 Vite 页面或切换到上述隔离端口。前端会对缺少的数组字段做安全归一化，并在剧本解读结果中保留版本错配提醒；这只是兼容旧服务的保护，不会替代后端升级。
 
 ### 5. Docker 启动
 
@@ -209,7 +209,7 @@ ALIYUN_OSS_ENDPOINT=oss-cn-shanghai.aliyuncs.com
 
 ### 8. 线上部署注意事项
 
-* 手动开发模式下，前端默认是 `5173`，后端是 `8000`。
+* 手动开发模式下，前端默认是 `5173`，qidian 后端是 `18000`；这样可以避开常见的 WSL/TechSpar 服务端口 `8000`。
 * Docker 模式下，前端默认对外暴露 `80` 端口。
 * 如果你在线上要使用麦克风或录音相关能力，建议启用 HTTPS；浏览器对非 `localhost` 的音频权限更严格。
 * 线上环境不要保留默认的 `JWT_SECRET`、`DEFAULT_PASSWORD`。

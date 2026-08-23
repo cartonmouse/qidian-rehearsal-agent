@@ -10,7 +10,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "gen:api": "openapi-typescript http://localhost:8000/openapi.json -o src/api/schema.d.ts"
+    "gen:api": "openapi-typescript http://localhost:18000/openapi.json -o src/api/schema.d.ts"
   },
   "dependencies": {
     "@fontsource/noto-sans-sc": "^5.3.0",

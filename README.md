@@ -46,7 +46,7 @@
 
 版本追踪已经接入侧栏“版本追踪”：选择两个已保存的剧本版本后，版本差异 Agent 会按场次编号对齐，标记新增/删除场次、角色和道具变化，以及带原始行号的新增、删除和修改台词；响应还会生成下游影响提醒，明确哪些排班、对词进度和资源结论需要人工复核。资源影响会进一步匹配当前用户近期的资源审计记录，并把场次、道具和审计记录一起带入资源复核入口。
 
-舞台可视化已经接入侧栏“舞台可视化”：Stage Agent 会读取场景中的角色、道具、舞台提示和台词行号，生成角色头像调度地图，以及按原文顺序排列的上场、下场、走位、道具和台词事件。没有明确位置的对象会标记为待人工确认。
+舞台可视化已经接入侧栏“舞台可视化”：Stage Agent 会读取场景中的角色、道具、舞台提示和台词行号，生成角色头像调度地图，以及按原文顺序排列的上场、下场、走位、道具和台词事件。没有明确位置的对象会标记为待人工确认。导演可以进入“编辑布局”模式，在“场次标签编辑”中新增、改名、移除人物/道具，或从用户已有标签库复用；也可以拖动角色/道具、循环切换演员在场状态，并用眼睛按钮把本场暂时不需要的角色或道具隐藏。保存的是当前用户对本剧本版本本场的人工覆盖，Agent 原始建议仍保留，并可随时恢复。标签变更、移除和临时隐藏只影响本场布局，不会删除剧本原文、台词、事件或 Agent 证据。
 
 资源管理已经接入侧栏“资源管理”：可以独立维护道具/服装库存，登记服装借出、多人分配、按记录部分归还/全部归还，查看逾期或临近归还提醒，预约排练室并拒绝同房间的时间重叠；选择剧本和场次后，Resource Agent 会逐项比较剧本道具需求与可用库存，输出“已就绪 / 维修中 / 缺失”及具体原因。资源变更 Agent 会保留库存借还、预约、配乐、预算和发票的结构化变更摘要；资源时间线支持按类型、变更动作和关键词筛选。剧本解析 Agent 会从明确的穿着/服装词中抽取服装需求，LLM 候选必须通过原文匹配，导演可在人工确认节点修正；调度 Agent 再把需求与服装库存快照对照，区分未匹配、库存不可用和已借出容量。
 
@@ -109,7 +109,7 @@ Agent 评估集已经接入仓库：`evals/rehearsal_cases.json` 覆盖剧本解
 ```bash
 copy .env.example .env
 pip install -r requirements.txt
-uvicorn backend.main:app --reload --port 8000
+uvicorn backend.main:app --reload --port 18000
 ```
 
 前端：
@@ -154,6 +154,9 @@ Agent 评估集说明和面试讲解要点位于 [`docs/agent-evaluation.md`](do
 - `GET /api/rehearsal/feedback/{record_id}`：读取单条反馈档案
 - `POST /api/rehearsal/scripts/{script_id}/diff`：将目标版本与请求体中的 `compare_script_id` 做结构化差异比较，并匹配当前用户的相关资源审计记录
 - `GET /api/rehearsal/scripts/{script_id}/stage/{scene_id}`：生成单个场次的舞台地图和动态事件
+- `GET/POST /api/rehearsal/stage-tags`：读取或新增当前用户可复用的人物/道具标签
+- `PUT /api/rehearsal/scripts/{script_id}/stage/{scene_id}`：以 `replace_lists=true` 保存导演对本场角色/道具标签、位置、角色在场状态和可见性的完整人工覆盖；缺少的标签会从本场布局移除，新增标签会进入用户复用库；`visible=false` 表示暂时隐藏，不删除源数据
+- `DELETE /api/rehearsal/scripts/{script_id}/stage/{scene_id}/override`：删除本场人工覆盖并恢复 Agent 建议
 - `GET/PUT /api/rehearsal/resources/inventory`：读取或替换当前用户的道具/服装库存
 - `GET /api/rehearsal/resources/audit?limit=50&resource_type=inventory&change_type=updated&query=椅子`：读取并筛选资源变更审计
 - `GET /api/rehearsal/resources/rooms`：读取当前用户的排练室预约

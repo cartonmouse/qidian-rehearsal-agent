@@ -148,6 +148,8 @@ LLM 回答必须引用检索结果中的证据 ID，并通过 Pydantic 校验；
 
 位置推断只使用舞台提示中的“左/右、前/后、中央”等明确词语；没有证据时使用默认布局或 `unknown`，不会让模型猜测具体走位。
 
+舞台地图是导演工作界面，而不是 Agent 的最终裁决。前端“编辑布局”模式提供“场次标签编辑”：导演可以在当前场次新增、改名、移除人物和道具，也可以从用户级复用标签库或当前剧本已有角色/道具中快速添加；随后把标签拖到九宫格位置，并点击角色循环切换“在场 / 不在场 / 未确认”状态。眼睛按钮可以把本场暂时不需要的角色或道具隐藏，隐藏对象可点击眼睛恢复，或直接拖回舞台区域恢复并重新定位。`PUT /api/rehearsal/scripts/{script_id}/stage/{scene_id}` 使用 `replace_lists=true` 保存完整的当前场次标签快照：请求中缺少的标签会从本场布局移除，新增标签会写入 `data/users/{id}/rehearsal/stage-tags.json` 供后续复用。`visible=false` 只表示本场导演布局暂时隐藏，不删除剧本原文、台词、事件或 Agent 证据；后续读取舞台地图时会在保留 `agent_actors`、`agent_props` 建议快照的基础上叠加人工结果，并标记 `human_overrides_applied` 和 `human_edited_at`。导演可以调用 `DELETE /api/rehearsal/scripts/{script_id}/stage/{scene_id}/override` 恢复最新 Agent 建议。上下场动态仍以剧本原文证据为准，当前版本不允许导演直接改写事件文本或原文行号。
+
 ### 资源管理 Resource Agent
 
 资源管理是独立入口，不要求先解析剧本。`GET/PUT /api/rehearsal/resources/inventory` 用用户隔离的 `data/users/{id}/rehearsal/resources/inventory.json` 保存道具和服装库存；每条记录包含类别、数量、状态、存放位置、备注，以及服装的已借出数量、聚合持有人、借出场次、预计归还时间、借还备注和 `custody_records` 明细。库存状态由剧团成员人工确认，Agent 不会把“有库存记录”直接当成“可用”。所有资源写入都会由 Resource Audit Agent 对比写入前后的结构化快照，保存到用户隔离的 `rehearsal/resources/audit.json`。

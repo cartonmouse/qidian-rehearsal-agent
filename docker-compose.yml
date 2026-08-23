@@ -1,10 +1,14 @@
+name: qidian-local
+
 services:
   backend:
     build:
       context: .
       dockerfile: backend/Dockerfile
     ports:
-      - "8000:8000"
+      # 8000 may be occupied by another WSL service on the developer machine.
+      # Keep the container port unchanged; expose qidian on its own host port.
+      - "18000:8000"
     volumes:
       - ./data:/app/data
     env_file:

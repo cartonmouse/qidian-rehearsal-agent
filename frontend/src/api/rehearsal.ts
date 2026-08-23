@@ -250,12 +250,28 @@ export interface StageActor {
   status: "onstage" | "offstage" | "unknown";
   position: StagePosition;
   source_lines: number[];
+  origin: "agent" | "manual";
+  visible: boolean;
 }
 
 export interface StageProp {
   name: string;
   position: StagePosition;
   source_lines: number[];
+  origin: "agent" | "manual";
+  visible: boolean;
+}
+
+export interface StageTag {
+  tag_id: string;
+  kind: "actor" | "prop";
+  name: string;
+  created_at: string;
+}
+
+export interface StageTagCatalog {
+  actors: StageTag[];
+  props: StageTag[];
 }
 
 export interface StageEvent {
@@ -276,6 +292,16 @@ export interface StageVisualization {
   events: StageEvent[];
   summary: string;
   warnings: string[];
+  agent_actors: StageActor[];
+  agent_props: StageProp[];
+  human_overrides_applied: boolean;
+  human_edited_at: string | null;
+}
+
+export interface StageLayoutUpdate {
+  actors: StageActor[];
+  props: StageProp[];
+  replace_lists: boolean;
 }
 
 export interface SceneReviewPatch {
@@ -884,6 +910,41 @@ export async function getStageVisualization(
     `/api/rehearsal/scripts/${encodeURIComponent(scriptId)}/stage/${encodeURIComponent(sceneId)}`,
   );
   await ensureOk(response, "舞台可视化加载失败");
+  return response.json();
+}
+
+export async function getStageTagCatalog(): Promise<StageTagCatalog> {
+  const response = await authFetch("/api/rehearsal/stage-tags");
+  await ensureOk(response, "舞台标签加载失败");
+  return response.json();
+}
+
+export async function saveStageVisualization(
+  scriptId: string,
+  sceneId: string,
+  payload: StageLayoutUpdate,
+): Promise<StageVisualization> {
+  const response = await authFetch(
+    `/api/rehearsal/scripts/${encodeURIComponent(scriptId)}/stage/${encodeURIComponent(sceneId)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+  await ensureOk(response, "舞台布局保存失败");
+  return response.json();
+}
+
+export async function resetStageVisualization(
+  scriptId: string,
+  sceneId: string,
+): Promise<StageVisualization> {
+  const response = await authFetch(
+    `/api/rehearsal/scripts/${encodeURIComponent(scriptId)}/stage/${encodeURIComponent(sceneId)}/override`,
+    { method: "DELETE" },
+  );
+  await ensureOk(response, "恢复 Agent 舞台布局失败");
   return response.json();
 }
 

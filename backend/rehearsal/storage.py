@@ -22,6 +22,8 @@ from backend.rehearsal.models import (
     ResourceInventoryItem,
     RoomBooking,
     ScheduleDraft,
+    StageLayoutOverride,
+    StageTag,
     ScriptAnalysis,
     ScriptSummary,
     SuggestionResponse,
@@ -31,6 +33,7 @@ from backend.rehearsal.models import (
 _SCRIPT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _RESOURCE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _RUN_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+_SCENE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 
 def _scripts_dir(user_id: str) -> Path:
@@ -147,6 +150,88 @@ def delete_schedule(script_id: str, *, user_id: str) -> None:
     path = _schedule_path(user_id, script_id)
     if path.exists():
         path.unlink()
+
+
+def _stage_overrides_dir(user_id: str, script_id: str) -> Path:
+    if not _SCRIPT_ID_RE.fullmatch(script_id):
+        raise ValueError("invalid script id")
+    path = settings.user_data_dir(user_id) / "rehearsal" / "stage-overrides" / script_id
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _stage_override_path(user_id: str, script_id: str, scene_id: str) -> Path:
+    if not _SCENE_ID_RE.fullmatch(scene_id):
+        raise ValueError("invalid scene id")
+    return _stage_overrides_dir(user_id, script_id) / f"{scene_id}.json"
+
+
+def save_stage_override(override: StageLayoutOverride, *, user_id: str) -> None:
+    _stage_override_path(user_id, override.script_id, override.scene_id).write_text(
+        json.dumps(override.model_dump(mode="json"), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def get_stage_override(script_id: str, scene_id: str, *, user_id: str) -> StageLayoutOverride | None:
+    path = _stage_override_path(user_id, script_id, scene_id)
+    if not path.exists():
+        return None
+    try:
+        return StageLayoutOverride.model_validate(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def delete_stage_override(script_id: str, scene_id: str, *, user_id: str) -> None:
+    path = _stage_override_path(user_id, script_id, scene_id)
+    if path.exists():
+        path.unlink()
+
+
+def _stage_tags_path(user_id: str) -> Path:
+    path = settings.user_data_dir(user_id) / "rehearsal"
+    path.mkdir(parents=True, exist_ok=True)
+    return path / "stage-tags.json"
+
+
+def list_stage_tags(*, user_id: str) -> list[StageTag]:
+    path = _stage_tags_path(user_id)
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return []
+    raw_items = payload.get("items", []) if isinstance(payload, dict) else payload
+    if not isinstance(raw_items, list):
+        return []
+    result: list[StageTag] = []
+    for item in raw_items:
+        try:
+            result.append(StageTag.model_validate(item))
+        except (ValueError, TypeError):
+            continue
+    return result
+
+
+def save_stage_tag(tag: StageTag, *, user_id: str) -> StageTag:
+    normalized = tag.model_copy(update={"name": tag.name.strip()})
+    tags = list_stage_tags(user_id=user_id)
+    key = (normalized.kind, normalized.name.casefold())
+    for index, existing in enumerate(tags):
+        if (existing.kind, existing.name.casefold()) != key:
+            continue
+        normalized = existing.model_copy(update={"name": normalized.name})
+        tags[index] = normalized
+        break
+    else:
+        tags.append(normalized)
+    _stage_tags_path(user_id).write_text(
+        json.dumps({"items": [item.model_dump(mode="json") for item in tags]}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return normalized
 
 
 def _line_reading_dir(user_id: str) -> Path:

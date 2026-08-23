@@ -66,6 +66,9 @@ from backend.rehearsal.models import (
     RoomBookingRequest,
     ScriptDiffRequest,
     StageVisualization,
+    StageTag,
+    StageTagCatalog,
+    StageTagCreateRequest,
     ScriptVersionDiff,
     ScheduleDraft,
     ScheduleBatchOverrideRequest,
@@ -86,6 +89,8 @@ from backend.rehearsal.models import (
     ScriptRagResponse,
     ScriptParseRequest,
     ScriptReviewRequest,
+    StageLayoutOverride,
+    StageLayoutUpdateRequest,
     SuggestionRequest,
     SuggestionResponse,
     SuggestionUpdateRequest,
@@ -132,6 +137,11 @@ from backend.rehearsal.storage import (
     delete_motto,
     save_promo_copy,
     save_resource_audit,
+    delete_stage_override,
+    get_stage_override,
+    list_stage_tags,
+    save_stage_override,
+    save_stage_tag,
 )
 
 
@@ -764,6 +774,34 @@ def compare_script_versions(
     )
 
 
+@router.get("/stage-tags", response_model=StageTagCatalog)
+def get_stage_tag_catalog(user_id: str = Depends(get_current_user)):
+    tags = list_stage_tags(user_id=user_id)
+    return StageTagCatalog(
+        actors=sorted((tag for tag in tags if tag.kind == "actor"), key=lambda tag: tag.name.casefold()),
+        props=sorted((tag for tag in tags if tag.kind == "prop"), key=lambda tag: tag.name.casefold()),
+    )
+
+
+@router.post("/stage-tags", response_model=StageTag)
+def create_stage_tag(
+    request: StageTagCreateRequest,
+    user_id: str = Depends(get_current_user),
+):
+    name = request.name.strip()
+    if not name:
+        raise HTTPException(400, "标签名称不能为空")
+    return save_stage_tag(
+        StageTag(
+            tag_id=uuid4().hex,
+            kind=request.kind,
+            name=name,
+            created_at=datetime.now(timezone.utc).isoformat(),
+        ),
+        user_id=user_id,
+    )
+
+
 @router.get("/scripts/{script_id}/stage/{scene_id}", response_model=StageVisualization)
 def render_stage_visualization(
     script_id: str,
@@ -778,6 +816,92 @@ def render_stage_visualization(
     if analysis is None:
         raise HTTPException(404, "剧本解析结果不存在")
     try:
+        view = StageVisualizationAgent().render(analysis, scene_id)
+        override = get_stage_override(script_id, scene_id, user_id=user_id)
+        return StageVisualizationAgent.apply_override(view, override)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.put("/scripts/{script_id}/stage/{scene_id}", response_model=StageVisualization)
+def save_stage_layout(
+    script_id: str,
+    scene_id: str,
+    request: StageLayoutUpdateRequest,
+    user_id: str = Depends(get_current_user),
+):
+    """Save a director's layout override for one scene."""
+    try:
+        analysis = get_script(script_id, user_id=user_id)
+    except ValueError:
+        raise HTTPException(400, "无效的剧本 ID")
+    if analysis is None:
+        raise HTTPException(404, "剧本解析结果不存在")
+
+    try:
+        agent_view = StageVisualizationAgent().render(analysis, scene_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+    actor_names = [actor.name for actor in agent_view.actors]
+    prop_names = [prop.name for prop in agent_view.props]
+    incoming_actors = [actor.model_copy(update={"name": actor.name.strip()}) for actor in request.actors]
+    incoming_props = [prop.model_copy(update={"name": prop.name.strip()}) for prop in request.props]
+    incoming_actor_names = [actor.name for actor in incoming_actors]
+    incoming_prop_names = [prop.name for prop in incoming_props]
+    if (
+        any(not name or len(name) > 80 for name in [*incoming_actor_names, *incoming_prop_names])
+        or len(incoming_actor_names) != len(set(incoming_actor_names))
+        or len(incoming_prop_names) != len(set(incoming_prop_names))
+    ):
+        raise HTTPException(400, "角色和道具标签不能为空、不能重复，且长度不能超过 80 个字符")
+    if not request.replace_lists and (
+        set(incoming_actor_names) != set(actor_names)
+        or set(incoming_prop_names) != set(prop_names)
+    ):
+        raise HTTPException(400, "旧版布局覆盖必须与 Agent 识别结果一致")
+
+    override = StageLayoutOverride(
+        script_id=script_id,
+        scene_id=scene_id,
+        actors=incoming_actors,
+        props=incoming_props,
+        replace_lists=request.replace_lists,
+        updated_at=datetime.now(timezone.utc).isoformat(),
+    )
+    save_stage_override(override, user_id=user_id)
+    if request.replace_lists:
+        updated_at = override.updated_at
+        for actor in incoming_actors:
+            if actor.name not in actor_names:
+                save_stage_tag(
+                    StageTag(tag_id=uuid4().hex, kind="actor", name=actor.name, created_at=updated_at),
+                    user_id=user_id,
+                )
+        for prop in incoming_props:
+            if prop.name not in prop_names:
+                save_stage_tag(
+                    StageTag(tag_id=uuid4().hex, kind="prop", name=prop.name, created_at=updated_at),
+                    user_id=user_id,
+                )
+    return StageVisualizationAgent.apply_override(agent_view, override)
+
+
+@router.delete("/scripts/{script_id}/stage/{scene_id}/override", response_model=StageVisualization)
+def reset_stage_layout(
+    script_id: str,
+    scene_id: str,
+    user_id: str = Depends(get_current_user),
+):
+    """Remove the director override and return to the latest Agent proposal."""
+    try:
+        analysis = get_script(script_id, user_id=user_id)
+    except ValueError:
+        raise HTTPException(400, "无效的剧本 ID")
+    if analysis is None:
+        raise HTTPException(404, "剧本解析结果不存在")
+    try:
+        delete_stage_override(script_id, scene_id, user_id=user_id)
         return StageVisualizationAgent().render(analysis, scene_id)
     except ValueError as exc:
         raise HTTPException(400, str(exc))

@@ -157,6 +157,11 @@
   html {
     font-size: var(--font-size);
     scrollbar-gutter: stable;
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
   }
 
   body {
@@ -181,9 +186,26 @@
     font-size: inherit;
   }
 
-  input, textarea {
+  input, textarea, select {
     font-family: inherit;
     font-size: inherit;
+  }
+
+  /* Native option menus do not reliably inherit Tailwind text colors. Keep
+     them readable when the browser opens the platform dropdown in dark mode. */
+  select {
+    color: var(--foreground);
+    background-color: var(--input-background);
+  }
+
+  option {
+    color: var(--foreground);
+    background-color: var(--input-background);
+  }
+
+  .dark select,
+  .dark option {
+    color-scheme: dark;
   }
 
   a {

@@ -8,6 +8,7 @@ from backend.rehearsal.models import (
     Scene,
     StageActor,
     StageEvent,
+    StageLayoutOverride,
     StagePosition,
     StageProp,
     StageVisualization,
@@ -128,7 +129,7 @@ class StageVisualizationAgent:
             f"第 {scene.number} 场当前识别 {len(onstage)} 名演员在台、"
             f"{len(prop_values)} 件道具和 {len(events)} 个舞台事件。"
         )
-        return StageVisualization(
+        view = StageVisualization(
             script_id=analysis.script_id,
             scene_id=scene.scene_id,
             scene_number=scene.number,
@@ -139,6 +140,77 @@ class StageVisualizationAgent:
             summary=summary,
             warnings=warnings,
         )
+        view.agent_actors = [actor.model_copy(deep=True) for actor in actor_values]
+        view.agent_props = [prop.model_copy(deep=True) for prop in prop_values]
+        return view
+
+    @staticmethod
+    def apply_override(
+        view: StageVisualization,
+        override: StageLayoutOverride | None,
+    ) -> StageVisualization:
+        """Overlay director edits without losing the original Agent proposal."""
+
+        if override is None:
+            return view
+
+        actor_overrides = {actor.name: actor for actor in override.actors}
+        prop_overrides = {prop.name: prop for prop in override.props}
+        if override.replace_lists:
+            agent_actors = {actor.name: actor for actor in view.actors}
+            agent_props = {prop.name: prop for prop in view.props}
+            view.actors = [
+                agent_actors[actor.name].model_copy(update={
+                    "status": actor.status,
+                    "position": actor.position,
+                    "visible": actor.visible,
+                })
+                if actor.name in agent_actors else actor.model_copy(update={
+                    "origin": "manual",
+                    "source_lines": [],
+                })
+                for actor in override.actors
+            ]
+            view.props = [
+                agent_props[prop.name].model_copy(update={
+                    "position": prop.position,
+                    "visible": prop.visible,
+                })
+                if prop.name in agent_props else prop.model_copy(update={
+                    "origin": "manual",
+                    "source_lines": [],
+                })
+                for prop in override.props
+            ]
+        else:
+            view.actors = [
+                actor.model_copy(update={
+                    "status": actor_overrides[actor.name].status,
+                    "position": actor_overrides[actor.name].position,
+                    "visible": actor_overrides[actor.name].visible,
+                })
+                if actor.name in actor_overrides else actor
+                for actor in view.actors
+            ]
+            view.props = [
+                prop.model_copy(update={
+                    "position": prop_overrides[prop.name].position,
+                    "visible": prop_overrides[prop.name].visible,
+                })
+                if prop.name in prop_overrides else prop
+                for prop in view.props
+            ]
+        onstage_count = sum(
+            1 for actor in view.actors if actor.visible and actor.status == "onstage"
+        )
+        visible_prop_count = sum(1 for prop in view.props if prop.visible)
+        view.summary = (
+            f"第 {view.scene_number} 场当前导演布局包含 {onstage_count} 名演员在台、"
+            f"{visible_prop_count} 件道具和 {len(view.events)} 个舞台事件。"
+        )
+        view.human_overrides_applied = True
+        view.human_edited_at = override.updated_at
+        return view
 
     @staticmethod
     def _initial_actors(scene: Scene) -> dict[str, StageActor]:
