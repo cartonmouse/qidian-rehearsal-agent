@@ -9,14 +9,13 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 from backend.llm_provider import HumanMessage, SystemMessage, get_llm
 from backend.rehearsal.models import DialogueLine, Scene, SourceSpan
-from backend.rehearsal.parser import SceneBlock
+from backend.rehearsal.parser import SceneBlock, parse_dialogue_line
 
 
 logger = logging.getLogger("uvicorn")
@@ -69,16 +68,13 @@ def _unique(values: list[str]) -> list[str]:
     return result
 
 
-_SOURCE_SPEAKER_RE = re.compile(r"^\s*[^\s:：()（）\[\]【】]{1,24}\s*[：:]\s*(.+?)\s*$")
-
-
 def _source_dialogue_text(lines: list[str]) -> str:
     """Return dialogue text from source lines, stripping only speaker prefixes."""
     parts: list[str] = []
     for raw_line in lines:
         text = raw_line.strip()
-        match = _SOURCE_SPEAKER_RE.match(text)
-        parts.append(match.group(1).strip() if match else text)
+        parsed = parse_dialogue_line(text)
+        parts.append(parsed[1] if parsed else text)
     return "\n".join(parts).strip()
 
 

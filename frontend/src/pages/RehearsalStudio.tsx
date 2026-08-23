@@ -213,6 +213,7 @@ export default function RehearsalStudio() {
       setTitle(result.title);
       setScriptText(`已上传 ${file.name}，解析结果已保存。`);
       setAnalysis(result);
+      setSchedule(null);
       setReviewing(false);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "文件解析失败");

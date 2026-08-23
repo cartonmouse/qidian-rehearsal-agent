@@ -23,6 +23,9 @@ _SCENE_LABEL_RE = re.compile(
 )
 _LOCATION_RE = re.compile(r"^\s*(?:内景|外景|INT\.?|EXT\.?)\s*(.*)$", re.IGNORECASE)
 _SPEAKER_RE = re.compile(r"^\s*([^\s:：()（）\[\]【】]{1,24})\s*[：:]\s*(.+?)\s*$")
+_BRACKET_SPEAKER_RE = re.compile(
+    r"^\s*[\[【](?P<label>[^\[\]【】]+)[\]】]\s*(?P<dialogue>.+?)\s*$"
+)
 _STAGE_CHARACTER_RE = re.compile(
     r"(?:^|[（(，,；;\s])([^\s，,。；;（）()]+?)"
     r"(?=(?:从|向|走|上场|下场|入场|进场|离场|退场|拿起|放下|站|坐|起身|进入|退出))"
@@ -118,11 +121,34 @@ def _chinese_number(value: str) -> int:
 
 
 def normalize_lines(script_text: str) -> list[tuple[int, str]]:
+    """Normalize line endings and mask YAML frontmatter without changing line numbers."""
     text = script_text.replace("\r\n", "\n").replace("\r", "\n").lstrip("\ufeff")
-    return list(enumerate(text.split("\n"), start=1))
+    raw_lines = list(enumerate(text.split("\n"), start=1))
+    if not raw_lines or raw_lines[0][1].strip() != "---":
+        return raw_lines
+
+    closing_index = next(
+        (
+            index
+            for index, (_, line) in enumerate(raw_lines[1:], start=1)
+            if line.strip() in {"---", "..."}
+        ),
+        None,
+    )
+    if closing_index is None:
+        return raw_lines
+    return [
+        (line_number, "" if index <= closing_index else line)
+        for index, (line_number, line) in enumerate(raw_lines)
+    ]
+
+
+def _strip_markdown_heading(text: str) -> str:
+    return re.sub(r"^\s*#{1,6}\s+", "", text.strip())
 
 
 def parse_scene_header(text: str) -> tuple[int, str] | None:
+    text = _strip_markdown_heading(text)
     match = _SCENE_RE.match(text)
     if match:
         return _chinese_number(match.group(1)), (match.group(2) or "").strip()
@@ -140,6 +166,25 @@ def parse_scene_header(text: str) -> tuple[int, str] | None:
     if match:
         return 1, match.group(1).strip()
     return None
+
+
+def parse_dialogue_line(text: str) -> tuple[str, str] | None:
+    """Parse the supported speaker formats and return (speaker, dialogue)."""
+    match = _SPEAKER_RE.match(text)
+    if match:
+        return match.group(1).strip(), match.group(2).strip()
+
+    match = _BRACKET_SPEAKER_RE.match(text)
+    if not match:
+        return None
+
+    label = match.group("label").strip()
+    if label.startswith(("^", "#")):
+        return None
+    speaker = re.split(r"[\s（(]", label, maxsplit=1)[0].strip()
+    if not speaker:
+        return None
+    return speaker, match.group("dialogue").strip()
 
 
 def split_scene_blocks(lines: list[tuple[int, str]]) -> tuple[list[SceneBlock], list[str]]:
@@ -168,7 +213,7 @@ def split_scene_blocks(lines: list[tuple[int, str]]) -> tuple[list[SceneBlock], 
 def is_stage_direction(text: str) -> bool:
     stripped = text.strip()
     return (
-        stripped.startswith(("（", "(", "[", "【", "*"))
+        stripped.startswith(("（", "(", "[", "【", "〔", "［", "*"))
         or stripped.endswith(("）", ")", "]", "】"))
         or stripped.startswith(("舞台提示", "灯光", "音效"))
     )
@@ -232,6 +277,21 @@ def extract_scene(block: SceneBlock) -> tuple[Scene, list[str]]:
             if costume not in costumes:
                 costumes.append(costume)
 
+        match = parse_dialogue_line(text)
+        if match and match[0] not in _META_SPEAKERS:
+            character, dialogue = match
+            if character not in characters:
+                characters.append(character)
+            lines.append(
+                DialogueLine(
+                    line_id=f"{scene_id}-line-{len(lines) + 1}",
+                    character=character,
+                    text=dialogue,
+                    source=SourceSpan(start_line=line_number, end_line=line_number, excerpt=raw_text.strip()),
+                )
+            )
+            continue
+
         if is_stage_direction(text):
             for character in extract_stage_characters(text):
                 if character not in characters:
@@ -243,23 +303,8 @@ def extract_scene(block: SceneBlock) -> tuple[Scene, list[str]]:
             ))
             continue
 
-        match = _SPEAKER_RE.match(text)
-        if not match or match.group(1) in _META_SPEAKERS:
-            # 首阶段不把无角色前缀的散文误判成台词，保留警告供人工复核。
-            continue
-
-        character = match.group(1).strip()
-        dialogue = match.group(2).strip()
-        if character not in characters:
-            characters.append(character)
-        lines.append(
-            DialogueLine(
-                line_id=f"{scene_id}-line-{len(lines) + 1}",
-                character=character,
-                text=dialogue,
-                source=SourceSpan(start_line=line_number, end_line=line_number, excerpt=raw_text.strip()),
-            )
-        )
+        # 首阶段不把无角色前缀的散文误判成台词，保留警告供人工复核。
+        continue
 
     if not lines:
         warnings.append(f"{block.title}未识别到角色台词，请检查角色名和冒号格式。")

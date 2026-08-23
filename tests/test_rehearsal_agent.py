@@ -128,6 +128,34 @@ def test_script_agent_repairs_missing_scene_header_conservatively():
     assert any("未识别到分场标题" in warning for warning in result.warnings)
 
 
+def test_script_agent_supports_obsidian_frontmatter_and_bracket_dialogue():
+    script = """---
+title: \"第一幕\"
+author: \"契诃夫\"
+book: \"樱桃园\"
+created: 2026-08-23
+---
+〔一间儿童室。拂晓。〕
+
+[洛巴兴]　火车到了，谢天谢地。几点钟了？
+[杜尼雅霞]　快两点了。[（吹灭蜡烛）]天已经亮了。
+[洛巴兴　（倾听）]不对......他们还要取行李。
+"""
+
+    result = ScriptAnalysisAgent().run(
+        title="5-02-第一幕",
+        version_label="v1",
+        script_text=script,
+    )
+
+    assert len(result.scenes) == 1
+    assert {character.name for character in result.characters} == {"洛巴兴", "杜尼雅霞"}
+    assert [line.character for line in result.scenes[0].lines] == ["洛巴兴", "杜尼雅霞", "洛巴兴"]
+    assert result.scenes[0].lines[0].text.startswith("火车到了")
+    assert result.scenes[0].lines[0].source.start_line == 9
+    assert not {"title", "author", "book", "created"}.intersection({character.name for character in result.characters})
+
+
 def test_schedule_agent_keeps_formal_draft_gated_by_human_review():
     analysis = ScriptAnalysisAgent().run(
         title="待确认剧本",
