@@ -1,11 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import useAuth from "../hooks/useAuth";
-import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Logo from "../components/Logo";
 import { loadRegistrationConfig } from "../lib/registrationConfig";
 
@@ -76,14 +75,6 @@ export default function Login() {
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[500px] h-[300px] bg-gradient-to-b from-primary/8 to-transparent rounded-full blur-[80px] pointer-events-none" />
 
       <div className="w-full max-w-sm relative z-10">
-        <button
-          onClick={() => navigate("/")}
-          className="flex items-center gap-1.5 text-sm text-dim hover:text-text transition-colors mb-8 cursor-pointer"
-        >
-          <ArrowLeft size={16} />
-          返回首页
-        </button>
-
         <Card className="relative overflow-hidden">
           <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-primary/10 to-transparent rounded-bl-full pointer-events-none" />
           <CardHeader className="relative">
@@ -91,9 +82,6 @@ export default function Login() {
               <Logo className="w-10 h-10 rounded-xl drop-shadow-sm" />
               <div>
                 <CardTitle>{isRegister ? "创建账号" : "欢迎回来"}</CardTitle>
-                <CardDescription className="mt-1">
-                  {isRegister ? "注册后开始你的面试训练" : "登录继续你的面试训练"}
-                </CardDescription>
               </div>
             </div>
           </CardHeader>

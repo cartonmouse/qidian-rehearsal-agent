@@ -99,7 +99,7 @@ function AppRoutes() {
                 <Route path="/interview/:sessionId" element={<Interview />} />
                 <Route path="/review/:sessionId" element={<Review />} />
                 <Route path="/history" element={<History />} />
-                {/* The inherited TechSpar profile dashboard is not part of qidian. */}
+                {/* The profile dashboard is not part of qidian. */}
                 <Route path="/profile" element={<Navigate to="/rehearsal" replace />} />
                 <Route path="/personal-agent" element={<PersonalAgent />} />
                 <Route path="/rehearsal" element={<RehearsalStudio />} />
