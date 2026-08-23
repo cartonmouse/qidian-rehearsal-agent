@@ -564,6 +564,8 @@
       "quantity": 1,
       "note": "归还入柜"
     },
+    "overdue_as_of": "2026-08-27T09:00:00",
+    "overdue_message_contains": "已逾期",
     "different_holder": "顾言",
     "different_holder_error": "持有人为 林澄",
     "over_return_quantity": 2,
@@ -572,6 +574,8 @@
       "checked_out_quantity": 1,
       "checked_out_holder": "林澄",
       "checked_out_scene": "第一场",
+      "overdue_alert_type": "overdue",
+      "overdue_alert_severity": "high",
       "borrowed_capacity": {"灰色外套": 1},
       "borrowed_snapshot": {"灰色外套": 1},
       "returned_quantity": 0,

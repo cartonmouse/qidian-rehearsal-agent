@@ -385,6 +385,19 @@ class CostumeReturnRequest(BaseModel):
         return value.strip()
 
 
+class CostumeCustodyAlert(BaseModel):
+    """A deterministic reminder derived from an active costume custody record."""
+
+    resource_id: str
+    name: str
+    alert_type: Literal["overdue", "due_soon", "missing_deadline"]
+    severity: Literal["high", "medium", "low"]
+    borrowed_quantity: int = Field(ge=1)
+    holder: str
+    expected_return_at: str | None = None
+    message: str
+
+
 class ResourceAuditChange(BaseModel):
     change_type: Literal["created", "updated", "deleted"]
     resource_id: str

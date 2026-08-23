@@ -419,6 +419,17 @@ export interface CostumeReturnRequest {
   note?: string;
 }
 
+export interface CostumeCustodyAlert {
+  resource_id: string;
+  name: string;
+  alert_type: "overdue" | "due_soon" | "missing_deadline";
+  severity: "high" | "medium" | "low";
+  borrowed_quantity: number;
+  holder: string;
+  expected_return_at: string | null;
+  message: string;
+}
+
 export interface ResourceAuditChange {
   change_type: "created" | "updated" | "deleted";
   resource_id: string;
@@ -900,6 +911,13 @@ export async function saveAvailability(slots: AvailabilitySlot[]): Promise<Avail
 export async function getResourceInventory(): Promise<ResourceInventoryItem[]> {
   const response = await authFetch("/api/rehearsal/resources/inventory");
   await ensureOk(response, "资源库存加载失败");
+  return response.json();
+}
+
+export async function getCostumeCustodyAlerts(asOf?: string): Promise<CostumeCustodyAlert[]> {
+  const params = asOf ? `?as_of=${encodeURIComponent(asOf)}` : "";
+  const response = await authFetch(`/api/rehearsal/resources/inventory/custody-alerts${params}`);
+  await ensureOk(response, "服装归还提醒加载失败");
   return response.json();
 }
 

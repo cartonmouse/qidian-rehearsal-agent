@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from contextlib import ExitStack
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 import sys
 from typing import Any
@@ -643,6 +644,15 @@ def _evaluate_costume_custody(case: dict[str, Any], checks: list[CheckResult]) -
     _check(checks, "checked_out_holder", checked_out.checked_out_to, expected["checked_out_holder"])
     _check(checks, "checked_out_scene", checked_out.checked_out_scene_label, expected["checked_out_scene"])
 
+    alerts = custody_agent.inspect_due(
+        [checked_out],
+        as_of=datetime.fromisoformat(str(case["overdue_as_of"])),
+    )
+    _check(checks, "overdue_alert_type", alerts[0].alert_type if alerts else None, expected["overdue_alert_type"])
+    _check(checks, "overdue_alert_severity", alerts[0].severity if alerts else None, expected["overdue_alert_severity"])
+    overdue_message_found = bool(alerts) and str(case["overdue_message_contains"]) in alerts[0].message
+    _check(checks, "overdue_alert_message", overdue_message_found, True, passed=overdue_message_found)
+
     checkout_audit = ResourceAuditAgent().compare(
         resource_type="inventory",
         operation="checkout",
@@ -714,6 +724,11 @@ def _evaluate_costume_custody(case: dict[str, Any], checks: list[CheckResult]) -
         returned_context.costume_capacities if returned_context else None,
         expected["returned_capacity"],
     )
+    returned_alerts = custody_agent.inspect_due(
+        [returned],
+        as_of=datetime.fromisoformat(str(case["overdue_as_of"])),
+    )
+    _check(checks, "returned_alerts_empty", returned_alerts, [], passed=not returned_alerts)
     return_audit = ResourceAuditAgent().compare(
         resource_type="inventory",
         operation="return",

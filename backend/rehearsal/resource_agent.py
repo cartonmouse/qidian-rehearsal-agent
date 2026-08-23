@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import re
 from collections import Counter, defaultdict
 from typing import Literal
@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from backend.rehearsal.models import (
     CostumeCheckoutRequest,
+    CostumeCustodyAlert,
     CostumeReturnRequest,
     ResourceAuditChange,
     ResourceAuditRecord,
@@ -280,6 +281,71 @@ class CostumeCustodyAgent:
                 "custody_note": request.note,
             })
         return item.model_copy(update=update)
+
+    def inspect_due(
+        self,
+        inventory: list[ResourceInventoryItem],
+        *,
+        as_of: datetime | None = None,
+        due_soon_hours: int = 24,
+    ) -> list[CostumeCustodyAlert]:
+        """Explain overdue, soon-due, and deadline-missing custody records."""
+        reference = (as_of or datetime.now()).replace(tzinfo=None)
+        due_soon_limit = reference + timedelta(hours=max(0, due_soon_hours))
+        alerts: list[CostumeCustodyAlert] = []
+        for item in inventory:
+            if item.category != "costume" or item.borrowed_quantity <= 0:
+                continue
+            expected_return_at = None
+            if item.expected_return_date and item.expected_return_time:
+                expected = datetime.strptime(
+                    f"{item.expected_return_date} {item.expected_return_time}",
+                    "%Y-%m-%d %H:%M",
+                )
+                expected_return_at = expected.strftime("%Y-%m-%d %H:%M")
+                if expected < reference:
+                    alerts.append(CostumeCustodyAlert(
+                        resource_id=item.resource_id,
+                        name=item.name,
+                        alert_type="overdue",
+                        severity="high",
+                        borrowed_quantity=item.borrowed_quantity,
+                        holder=item.checked_out_to,
+                        expected_return_at=expected_return_at,
+                        message=(
+                            f"服装“{item.name}”已逾期，原定 {expected_return_at} 归还，"
+                            f"当前持有人：{item.checked_out_to or '未记录'}。"
+                        ),
+                    ))
+                elif expected <= due_soon_limit:
+                    alerts.append(CostumeCustodyAlert(
+                        resource_id=item.resource_id,
+                        name=item.name,
+                        alert_type="due_soon",
+                        severity="medium",
+                        borrowed_quantity=item.borrowed_quantity,
+                        holder=item.checked_out_to,
+                        expected_return_at=expected_return_at,
+                        message=(
+                            f"服装“{item.name}”将在 {expected_return_at} 前到期，"
+                            f"当前持有人：{item.checked_out_to or '未记录'}。"
+                        ),
+                    ))
+                continue
+            alerts.append(CostumeCustodyAlert(
+                resource_id=item.resource_id,
+                name=item.name,
+                alert_type="missing_deadline",
+                severity="low",
+                borrowed_quantity=item.borrowed_quantity,
+                holder=item.checked_out_to,
+                message=f"服装“{item.name}”仍有 {item.borrowed_quantity} 件借出，但没有预计归还时间。",
+            ))
+        severity_order = {"high": 0, "medium": 1, "low": 2}
+        return sorted(
+            alerts,
+            key=lambda alert: (severity_order[alert.severity], alert.expected_return_at or "", alert.name),
+        )
 
     @staticmethod
     def _find(inventory: list[ResourceInventoryItem], resource_id: str) -> ResourceInventoryItem:

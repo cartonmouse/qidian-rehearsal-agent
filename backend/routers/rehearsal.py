@@ -44,6 +44,7 @@ from backend.rehearsal.models import (
     BudgetUpdateRequest,
     Character,
     CostumeCheckoutRequest,
+    CostumeCustodyAlert,
     CostumeReturnRequest,
     InvoiceRecord,
     InvoiceUpdateRequest,
@@ -209,6 +210,24 @@ def _replace_inventory_item(
 def read_resource_inventory(user_id: str = Depends(get_current_user)):
     """Read the current user's prop and costume inventory."""
     return get_inventory(user_id=user_id)
+
+
+@router.get("/resources/inventory/custody-alerts", response_model=list[CostumeCustodyAlert])
+def read_costume_custody_alerts(
+    as_of: str | None = Query(default=None, max_length=50),
+    user_id: str = Depends(get_current_user),
+):
+    """Return deterministic overdue and due-soon reminders for active custody records."""
+    reference = datetime.now()
+    if as_of:
+        try:
+            reference = datetime.fromisoformat(as_of.replace("Z", "+00:00")).replace(tzinfo=None)
+        except ValueError as exc:
+            raise HTTPException(400, "as_of 必须是有效的 ISO 日期时间") from exc
+    return CostumeCustodyAgent().inspect_due(
+        get_inventory(user_id=user_id),
+        as_of=reference,
+    )
 
 
 @router.put("/resources/inventory", response_model=list[ResourceInventoryItem])

@@ -1280,6 +1280,27 @@ def test_costume_custody_agent_tracks_partial_return_and_rejects_boundaries():
     assert checked_out.checked_out_scene_label == "第一场"
     assert checked_out.expected_return_date == "2026-08-26"
 
+    overdue_alerts = agent.inspect_due([checked_out], as_of=datetime(2026, 8, 27, 9, 0))
+    assert overdue_alerts[0].alert_type == "overdue"
+    assert overdue_alerts[0].severity == "high"
+    assert "已逾期" in overdue_alerts[0].message
+    due_soon_alerts = agent.inspect_due([checked_out], as_of=datetime(2026, 8, 26, 9, 0))
+    assert due_soon_alerts[0].alert_type == "due_soon"
+    assert due_soon_alerts[0].severity == "medium"
+
+    no_deadline = ResourceInventoryItem(
+        resource_id="costume-no-deadline",
+        category="costume",
+        name="黑色西装",
+        quantity=1,
+        status="available",
+        borrowed_quantity=1,
+        checked_out_to="顾言",
+    )
+    missing_deadline_alerts = agent.inspect_due([no_deadline], as_of=datetime(2026, 8, 26, 9, 0))
+    assert missing_deadline_alerts[0].alert_type == "missing_deadline"
+    assert missing_deadline_alerts[0].severity == "low"
+
     checked_out_twice = agent.checkout(
         [checked_out],
         "costume-custody",
@@ -1313,6 +1334,7 @@ def test_costume_custody_agent_tracks_partial_return_and_rejects_boundaries():
     assert returned_all.borrowed_quantity == 0
     assert returned_all.checked_out_to == ""
     assert returned_all.expected_return_date is None
+    assert agent.inspect_due([returned_all], as_of=datetime(2026, 8, 27, 9, 0)) == []
     try:
         agent.return_item([returned_all], "costume-custody", CostumeReturnRequest())
     except ValueError as exc:
@@ -1365,7 +1387,12 @@ def test_schedule_agent_deducts_borrowed_costume_capacity_and_explains_it():
 
 def test_inventory_routes_keep_custody_actions_user_scoped_and_protect_put_updates():
     try:
-        from backend.routers.rehearsal import checkout_costume, return_costume, write_resource_inventory
+        from backend.routers.rehearsal import (
+            checkout_costume,
+            read_costume_custody_alerts,
+            return_costume,
+            write_resource_inventory,
+        )
     except ModuleNotFoundError as exc:
         if exc.name == "jose":
             return
@@ -1378,7 +1405,13 @@ def test_inventory_routes_keep_custody_actions_user_scoped_and_protect_put_updat
         quantity=2,
         status="available",
     )]
-    checkout_request = CostumeCheckoutRequest(quantity=1, holder="林澄", scene_label="第一场")
+    checkout_request = CostumeCheckoutRequest(
+        quantity=1,
+        holder="林澄",
+        scene_label="第一场",
+        expected_return_date="2026-08-26",
+        expected_return_time="21:00",
+    )
 
     with patch("backend.routers.rehearsal.get_inventory", return_value=inventory), \
         patch("backend.routers.rehearsal.save_inventory") as save_inventory, \
@@ -1389,6 +1422,13 @@ def test_inventory_routes_keep_custody_actions_user_scoped_and_protect_put_updat
     save_inventory.assert_called_once()
     audit.assert_called_once()
     assert audit.call_args.kwargs["operation"] == "checkout"
+
+    with patch("backend.routers.rehearsal.get_inventory", return_value=[checked_out]):
+        alerts = read_costume_custody_alerts(as_of="2026-08-27T09:00:00", user_id="route-user")
+
+    assert alerts[0].alert_type == "overdue"
+    assert alerts[0].severity == "high"
+    assert alerts[0].holder == "林澄"
 
     stale_client_snapshot = checked_out.model_copy(update={"borrowed_quantity": 0, "checked_out_to": ""})
     with patch("backend.routers.rehearsal.get_inventory", return_value=[checked_out]), \

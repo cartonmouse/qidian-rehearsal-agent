@@ -21,6 +21,7 @@ import {
   checkoutCostume,
   createRoomBooking,
   deleteRoomBooking,
+  getCostumeCustodyAlerts,
   getResourceInventory,
   getResourceAudits,
   getRoomBookings,
@@ -30,6 +31,7 @@ import {
   returnCostume,
   type ResourceCheckResponse,
   type ResourceAuditRecord,
+  type CostumeCustodyAlert,
   type ResourceInventoryItem,
   type RoomBooking,
   type ScriptAnalysis,
@@ -82,6 +84,7 @@ function today() {
 export default function ResourceManagement() {
   const [searchParams] = useSearchParams();
   const [inventory, setInventory] = useState<ResourceInventoryItem[]>([]);
+  const [custodyAlerts, setCustodyAlerts] = useState<CostumeCustodyAlert[]>([]);
   const [audits, setAudits] = useState<ResourceAuditRecord[]>([]);
   const [bookings, setBookings] = useState<RoomBooking[]>([]);
   const [scripts, setScripts] = useState<ScriptSummary[]>([]);
@@ -117,10 +120,11 @@ export default function ResourceManagement() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    void Promise.all([getResourceInventory(), getRoomBookings(), getScripts(), getResourceAudits(200)])
-      .then(([items, roomItems, scriptItems, auditItems]) => {
+    void Promise.all([getResourceInventory(), getCostumeCustodyAlerts(), getRoomBookings(), getScripts(), getResourceAudits(200)])
+      .then(([items, alertItems, roomItems, scriptItems, auditItems]) => {
         if (cancelled) return;
         setInventory(items);
+        setCustodyAlerts(alertItems);
         setAudits(auditItems);
         setBookings(roomItems);
         setScripts(scriptItems);
@@ -146,6 +150,14 @@ export default function ResourceManagement() {
       setAudits(await getResourceAudits(200));
     } catch {
       // The resource write has already succeeded; the audit panel can refresh later.
+    }
+  }
+
+  async function refreshCustodyAlerts() {
+    try {
+      setCustodyAlerts(await getCostumeCustodyAlerts());
+    } catch {
+      // The custody action has already succeeded; the reminder panel can refresh later.
     }
   }
 
@@ -319,6 +331,8 @@ export default function ResourceManagement() {
           item.resource_id === updated.resource_id ? updated : item
         )))}
         onRefreshAudits={refreshAudits}
+        alerts={custodyAlerts}
+        onRefreshAlerts={refreshCustodyAlerts}
       />
 
       <ResourceCheckCard
@@ -492,12 +506,16 @@ function InventoryCard({
 
 function CostumeCustodyCard({
   inventory,
+  alerts,
   onUpdated,
   onRefreshAudits,
+  onRefreshAlerts,
 }: {
   inventory: ResourceInventoryItem[];
+  alerts: CostumeCustodyAlert[];
   onUpdated: (item: ResourceInventoryItem) => void;
   onRefreshAudits: () => Promise<void>;
+  onRefreshAlerts: () => Promise<void>;
 }) {
   const costumes = useMemo(() => inventory.filter((item) => item.category === "costume"), [inventory]);
   const [resourceId, setResourceId] = useState("");
@@ -560,6 +578,7 @@ function CostumeCustodyCard({
       });
       onUpdated(updated);
       await onRefreshAudits();
+      await onRefreshAlerts();
       setMessage(`已登记借出 ${updated.name} ${form.quantity} 件。`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "服装借出登记失败");
@@ -580,6 +599,7 @@ function CostumeCustodyCard({
       });
       onUpdated(updated);
       await onRefreshAudits();
+      await onRefreshAlerts();
       setMessage(`已登记归还 ${updated.name}，当前全部在库。`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "服装归还登记失败");
@@ -600,6 +620,17 @@ function CostumeCustodyCard({
           </div>
           <span className="rounded-full border border-primary/20 bg-primary/8 px-2 py-1 text-[10px] text-primary">Costume Custody Agent</span>
         </div>
+
+        {alerts.length > 0 && (
+          <div className="mt-4 space-y-2">
+            <div className="flex items-center gap-2 text-xs font-semibold text-text"><AlertTriangle size={14} className="text-orange" />归还提醒</div>
+            {alerts.map((alert) => (
+              <div key={`${alert.resource_id}-${alert.alert_type}`} className={cn("rounded-lg border px-3 py-2 text-xs leading-5", alert.severity === "high" ? "border-red/25 bg-red/8 text-red" : alert.severity === "medium" ? "border-orange/25 bg-orange/8 text-orange" : "border-border bg-background/35 text-dim")}>
+                {alert.message}
+              </div>
+            ))}
+          </div>
+        )}
 
         {costumes.length === 0 ? (
           <div className="mt-4 rounded-xl border border-dashed border-border bg-background/35 px-4 py-6 text-center text-sm text-dim">先在上方新增并保存一条服装库存记录，再登记借还。</div>
