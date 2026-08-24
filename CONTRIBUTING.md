@@ -1,76 +1,54 @@
 # 参与贡献
 
-谢谢你愿意花时间让 TechSpar 变得更好。这个项目还在持续打磨,不管是修 bug、补文档还是加功能,都欢迎。
+感谢你为奇点排练 Agent 提交问题、改进建议或代码。项目围绕剧本解析、排练调度、对词、舞台可视化和排练资产协作持续演进。
 
 ## 开始之前
 
-- **用着别扭、发现 bug、有想法**:直接开 [Issue](https://github.com/AnnaSuSu/TechSpar/issues) 聊,把场景说清楚就行,不用拘谨。
-- **小改动**(修 bug、补文档、小优化):直接提 PR。
-- **大改动**(新功能、重构、动架构):建议先开 Issue 对一下方向,免得白做。
+- 小改动（修复问题、补充文档、界面优化）可以直接提交 Issue 或 Pull Request。
+- 新 Agent、数据模型或部署方式等较大改动，建议先在 Issue 中说明场景、边界和验收方式。
+- 请不要提交真实剧本、演员个人信息、API Key、`.env` 或运行时 `data/`。
 
-## 把项目跑起来
+## 本地开发
 
-完整步骤见 [README 快速开始](README.md#快速开始),速记版:
+完整步骤见 [部署说明](docs/deployment.md)。常用命令：
 
 ```bash
-# 后端
 pip install -r requirements.txt
-uvicorn backend.main:app --reload --port 8000
+uvicorn backend.main:app --reload --port 18000
 
-# 前端
-cd frontend && npm install && npm run dev
+cd frontend
+npm install
+npm run dev
 ```
 
-所有模型密钥都是登录后在「设置」里按用户配置的,`.env` 里只有启动引导项。
+模型服务可以在登录后的设置页按用户配置；规则解析、排班和原词对词不依赖外部模型。
 
-## 项目结构速览
+## 项目结构
 
-```
-backend/            FastAPI 后端(routers/ 路由、graphs/ 面试流程、prompts/ 提示词)
-frontend/src/       React 19 + Vite + Tailwind 4
-  pages/            页面(大页面拆同名小写文件夹)
-  api/              fetch 封装 + openapi 生成的接口类型
-  resume/           简历编辑器模块(移植自 Magic Resume,见该目录 README)
-data/users/<id>/    每用户数据(不入库)
-tests/              后端回归测试
+```text
+backend/rehearsal/   剧本、调度、RAG、对词和舞台领域服务
+backend/routers/     FastAPI 路由
+backend/storage/     用户隔离数据与运行记录
+frontend/src/        React + TypeScript 页面与组件
+evals/               离线 Agent 评估案例
+docs/                产品、开发、部署和评估说明
+tests/               回归测试
 ```
 
 ## 代码约定
 
-**前端**
+- 路由按领域拆分，鉴权统一使用当前用户依赖。
+- LLM 输出必须经过结构化解析和来源校验；原文、档期和资源约束由确定性逻辑守门。
+- 新增 Agent 能力时，同时补充工具调用记录、失败回退和离线评估用例。
+- 前端改动后运行 `npm run typecheck`、`npm run lint` 和 `npm run build`。
+- 后端改动后运行 `python -m compileall -q backend` 和相关回归测试。
 
-- JS/TS 长期共存:**新代码一律写 TS**,改到老 `.jsx` 顺手转;纯展示页(Landing 等)不强求。
-- 提交前跑一遍,三个都要过:
+## 提交与 Pull Request
 
-  ```bash
-  cd frontend
-  npm run typecheck   # tsc 严格模式,零错误
-  npm run lint        # eslint,零错误
-  npm run build
-  ```
+- 提交信息使用 `类型(范围): 描述`，例如 `feat(schedule): explain unassigned reasons`。
+- 一个提交尽量只解决一个问题。
+- PR 请说明动机、实现范围、验证命令；涉及界面变化时附上截图。
 
-- 改了后端接口后,起着后端跑 `npm run gen:api` 重新生成 `src/api/schema.d.ts`。
+## 许可
 
-**后端**
-
-- 路由按域拆在 `backend/routers/`,`prefix="/api"`;鉴权统一 `Depends(get_current_user)`。
-- LLM 调用一律走 `llm_provider.get_llm(user_id)`(消息用同模块的 `SystemMessage/HumanMessage/AIMessage` 构造),让 LLM 只返回 JSON 时用 `parse_json_response` 解析并做一次重试。
-- 回归测试:`pytest tests/`。
-
-**通用原则**
-
-- **不绑定任何特定服务商**:LLM/Embedding/语音等全部走用户自配的兼容接口,代码和文案里不要假定某家服务。
-- 中文注释写"为什么",不复述代码。
-
-## 提交与 PR
-
-- 提交信息:`类型(范围): 描述`,类型前缀用英文(`feat / fix / chore / refactor / docs`),描述中英文皆可。例:`feat(profile): 画像页新增到期复习提醒`。
-- 一个提交只做一件事,保证每个提交后项目都能构建。
-- PR 描述里写清楚**动机**和**改了什么**,有界面变化附个截图。
-
-## License 须知
-
-- 项目整体为 [CC BY-NC 4.0](LICENSE),提交贡献即表示你同意你的代码以相同条款发布。
-- 例外:`frontend/src/resume/` 移植自 [Magic Resume](https://github.com/JOYCEQL/magic-resume),保留其原始协议(Apache 2.0 + 附加商业限制),向该目录贡献代码同样受其条款约束,详见该目录的 `LICENSE` 与 `README.md`。
-
-再次感谢!跑通了新的部署方式、接入了新的服务商,也欢迎回来在 Issue 里分享,让后面的人少踩坑。
+项目整体遵循 [CC BY-NC 4.0](LICENSE)。部分通用前端组件保留其原始目录中的许可说明，贡献前请一并阅读对应 `LICENSE` 文件。

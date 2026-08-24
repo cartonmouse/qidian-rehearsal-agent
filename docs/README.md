@@ -1,32 +1,20 @@
-# TechSpar 文档中心
+# 奇点排练 Agent 文档中心
 
-如果你是第一次接触这个项目，建议先关心两件事：
+文档围绕话剧排练场景组织，描述当前仓库真实实现，不包含个人资料或私人运行数据。
 
-1. 项目怎么启动。
-2. 项目跑起来之后，新手第一天应该怎么玩。
+## 推荐阅读顺序
 
-如果你是第一次接触这个项目，建议按下面顺序阅读：
+1. [部署说明](deployment.md)：本地、Docker 和公开演示部署。
+2. [排练 Agent 设计说明](rehearsal-agent.md)：领域模型、流程边界和人工确认节点。
+3. [Agent 评估集](agent-evaluation.md)：离线评估案例、工具调用和边界校验。
+4. [开发者说明](developer.md)：目录结构、开发命令和贡献约定。
+5. [外部服务配置](external-services.md)：LLM、Embedding 和本地模型配置。
 
-1. [部署说明](deployment.md)：把项目跑起来。
-2. [外部服务配置](external-services.md)：需要启用 Copilot 语音、联网搜索或录音转写时再看。
-3. [快速开始](quick-start.md)：确认你能正常登录并完成第一轮体验。
-4. [新手上手](getting-started.md)：按真实产品流程开始使用，而不是盲目点页面。
+## 示例
 
-之后再按需求查阅：
+- [《轨道之外》排练示例](examples/qidian-demo-script.md)
+- [《回声室》排练示例](examples/qidian-echo-room-script.md)
+- [可排班演员档期](examples/qidian-actor-availability-feasible.csv)
+- [无共同时间的冲突档期](examples/qidian-actor-availability.csv)
 
-- [题库与知识库](knowledge-base.md)
-- [专项训练怎么玩](special-training.md)
-- [简历模拟面试](resume-mock.md)
-- [JD 定向备面](jd-preparation.md)
-- [面试 Copilot](copilot.md)
-- [录音复盘](recording-review.md)
-- [我的画像与领域回顾](profile-retrospective.md)
-- [题目图谱](graph.md)
-- [设置](settings.md)
-- [训练结果怎么看](training-results.md)
-- [常见问题](faq.md)
-- [开发者说明](developer.md)
-
-TechSpar 的核心不是单一页面或单次刷题，而是把专项训练、简历面试、JD 备面、实时 Copilot 与录音复盘串成同一条持续进化的技术面试闭环。
-
-文档里的功能描述以当前仓库实现为准，不写“理想上应该有”的流程。
+文档中的剧本、角色、档期和资源均为示例数据。请勿把真实剧本、演员联系方式或模型密钥提交到仓库。

@@ -1,6 +1,6 @@
 # Agent 评估集
 
-`evals/rehearsal_cases.json` 是奇点排练 Agent 的第一版离线评估集。它不依赖 LLM、Embedding 或登录态，适合本地开发、CI 和面试演示，目标是验证 Agent 的可观察行为是否稳定，而不是用一个未经定义的分数评价“生成得像不像人”。
+`evals/rehearsal_cases.json` 是奇点排练 Agent 的第一版离线评估集。它不依赖 LLM、Embedding 或登录态，适合本地开发、CI 和公开功能验收，目标是验证 Agent 的可观察行为是否稳定，而不是用一个未经定义的分数评价“生成得像不像人”。
 
 ## 覆盖范围
 
@@ -38,7 +38,7 @@ python -m evals.run_rehearsal_evals
 
 命令会输出一份 JSON 报告；所有用例通过时退出码为 `0`，任意用例失败时退出码为 `1`。后端回归测试也会调用同一个 `evaluate_cases()`，因此评估集会随 GitHub Actions 一起运行。
 
-## 面试讲解要点
+## 工程设计要点
 
 这组评估体现了 Agent 工程中的三个原则：
 

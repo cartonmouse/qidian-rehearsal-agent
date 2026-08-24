@@ -1,11 +1,11 @@
 # OpenAI-compatible client (Chat LLM + Embedding;封装在 llm_provider.py)
 openai>=1.0.0
-# 向量余弦检索的数值后端（indexer / memory / graph / copilot 直接 import）
+# 向量余弦检索的数值后端（indexer / memory / graph 直接 import）
 numpy>=1.26.0
 
 # Optional local embedding dependencies live in requirements.local-embedding.txt
 
-# PDF reading (for resume RAG)
+# PDF reading (for uploaded script and document assets)
 pypdf>=4.0.0
 
 # Web
@@ -21,16 +21,16 @@ oss2>=2.18.0
 bcrypt>=4.0.0
 python-jose[cryptography]>=3.3.0
 
-# HTTP（transcribe 直接 import；此前仅靠 oss2/tavily 传递依赖）
+# HTTP（transcribe 直接 import）
 requests>=2.31.0
 
-# Web search (Copilot Company Researcher)
+# Optional web search integration
 tavily-python>=0.3.0
 
-# Copilot 实时 ASR (DashScope qwen3-asr-flash-realtime)
+# Optional real-time ASR (DashScope qwen3-asr-flash-realtime)
 websockets>=12.0
 
-# Tencent Cloud VPR (可选，用于候选人声纹识别)
+# Optional voiceprint integration
 tencentcloud-sdk-python-common>=3.0.1000
 
 # VAD 切段（C 库，非神经网络）

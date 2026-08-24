@@ -56,7 +56,7 @@ def embedding_target_of(
 
 
 class Settings(BaseSettings):
-    # No provider/service secrets live here. LLM, Embedding, DashScope, Tavily and
+    # No provider/service secrets live here. LLM, Embedding, audio and other
     # OSS keys are all per-user (data/users/<id>/provider.json + voiceprint.json),
     # resolved at request time by backend.llm_provider. The .env only carries the
     # bootstrap config below — never an API key.
@@ -70,12 +70,12 @@ class Settings(BaseSettings):
 
     # Auth
     jwt_secret: str = "change-me-in-production"
-    default_email: str = "admin@techspar.local"
+    default_email: str = "admin@qidian.local"
     default_password: str = "admin123"
     default_name: str = "Admin"
     allow_registration: bool = False
 
-    # Interview settings
+    # Session limits
     max_questions_per_phase: int = 5
     max_drill_questions: int = 15
 

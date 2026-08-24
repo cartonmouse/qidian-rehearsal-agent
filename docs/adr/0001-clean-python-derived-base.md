@@ -3,7 +3,7 @@ status: accepted
 ---
 # 从 TechSpar 的 Python 基线建立独立项目
 
-奇点排练 Agent 采用 TechSpar 的干净 Python/FastAPI 历史提交作为工程基线，在新仓库中保留其 React/Vite 前端壳、认证、LLM 配置、RAG、SQLite 和通用 UI；面试领域页面暂时作为 legacy 保留，逐步由排练领域功能替换。这样既能复用已经验证过的平台能力，也能让新仓库的公开内容只围绕话剧排练展开，并避免把本地简历、密钥和运行数据带入版本库。
+奇点排练 Agent 采用 TechSpar 的干净 Python/FastAPI 历史提交作为工程基线，在新仓库中保留其 React/Vite 前端壳、认证、LLM 配置、RAG、SQLite 和通用 UI；历史通用页面暂时作为 legacy 保留，逐步由排练领域功能替换。这样既能复用已经验证过的平台能力，也能让新仓库的公开内容只围绕话剧排练展开，并避免把本地个人资料、密钥和运行数据带入版本库。
 
 ## Considered Options
 
