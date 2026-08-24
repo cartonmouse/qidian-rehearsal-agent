@@ -51,27 +51,27 @@
 <table>
   <tr>
     <td width="50%">
-      <img src="images/微信图片_20260824111617_1156_4.png" alt="剧本解析结果">
+      <img src="images/script-analysis.png" alt="剧本解析结果">
       <p align="center"><b>剧本解析与结构化结果</b><br>角色、道具、服装、场次、台词和原文行号</p>
     </td>
     <td width="50%">
-      <img src="images/微信图片_20260824111617_1157_4.png" alt="剧本问答 RAG">
+      <img src="images/script-qa-rag.png" alt="剧本问答 RAG">
       <p align="center"><b>证据约束的剧本问答</b><br>回答引用当前剧本版本的可核对证据</p>
     </td>
   </tr>
   <tr>
     <td width="50%">
-      <img src="images/微信图片_20260824111617_1158_4.png" alt="演员排练表与调度 Agent">
+      <img src="images/rehearsal-schedule-agent.png" alt="演员排练表与调度 Agent">
       <p align="center"><b>调度 Agent 与自动排班</b><br>演员档期、任务、资源、换装缓冲和未排班原因</p>
     </td>
     <td width="50%">
-      <img src="images/微信图片_20260824111617_1159_4.png" alt="对词 Agent">
+      <img src="images/line-reading-agent.png" alt="对词 Agent">
       <p align="center"><b>有状态对词 Agent</b><br>角色、场次、台词游标和原词/适应性练习模式</p>
     </td>
   </tr>
   <tr>
     <td colspan="2">
-      <img src="images/微信图片_20260824111617_1160_4.png" alt="舞台可视化与导演布局编辑">
+      <img src="images/stage-visualization.png" alt="舞台可视化与导演布局编辑">
       <p align="center"><b>舞台可视化与导演编辑</b><br>Agent 提供布局建议，导演可以编辑人物、道具和上下场动态</p>
     </td>
   </tr>
