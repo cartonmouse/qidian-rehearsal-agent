@@ -24,6 +24,10 @@
   <a href="https://github.com/cartonmouse/qidian-rehearsal-agent"><img src="https://img.shields.io/github/stars/cartonmouse/qidian-rehearsal-agent?style=flat" alt="GitHub stars"></a>
 </p>
 
+<p align="center">
+  <img src="images/homepage-hero-zh.png" alt="奇点排练 Agent 工作流总览">
+</p>
+
 ## 为什么需要奇点排练
 
 排练现场的信息往往分散在剧本、群聊、表格、道具清单和导演的临场决定里。奇点排练把这些信息组织成一个工作上下文：
@@ -36,6 +40,44 @@
 - 每次 Agent 运行、版本变化和现场反馈都能被复盘。
 
 它不是一个只会生成文案的聊天窗口，而是一套围绕排练状态、约束和现场协作设计的工具。
+
+## 产品界面
+
+首页图用于概括产品工作流，下面是来自真实本地测试的功能截图。截图中的剧本、角色和数字均为示例数据，不代表固定的业务内容。
+
+<details open>
+<summary>查看真实功能界面</summary>
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="images/微信图片_20260824111617_1156_4.png" alt="剧本解析结果">
+      <p align="center"><b>剧本解析与结构化结果</b><br>角色、道具、服装、场次、台词和原文行号</p>
+    </td>
+    <td width="50%">
+      <img src="images/微信图片_20260824111617_1157_4.png" alt="剧本问答 RAG">
+      <p align="center"><b>证据约束的剧本问答</b><br>回答引用当前剧本版本的可核对证据</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="images/微信图片_20260824111617_1158_4.png" alt="演员排练表与调度 Agent">
+      <p align="center"><b>调度 Agent 与自动排班</b><br>演员档期、任务、资源、换装缓冲和未排班原因</p>
+    </td>
+    <td width="50%">
+      <img src="images/微信图片_20260824111617_1159_4.png" alt="对词 Agent">
+      <p align="center"><b>有状态对词 Agent</b><br>角色、场次、台词游标和原词/适应性练习模式</p>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2">
+      <img src="images/微信图片_20260824111617_1160_4.png" alt="舞台可视化与导演布局编辑">
+      <p align="center"><b>舞台可视化与导演编辑</b><br>Agent 提供布局建议，导演可以编辑人物、道具和上下场动态</p>
+    </td>
+  </tr>
+</table>
+
+</details>
 
 ## 功能一览
 
