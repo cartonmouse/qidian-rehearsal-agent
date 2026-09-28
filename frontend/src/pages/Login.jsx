@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Logo from "../components/Logo";
+import ComplianceFooter from "../components/ComplianceFooter";
 import { loadRegistrationConfig } from "../lib/registrationConfig";
 
 export default function Login() {
@@ -71,10 +72,11 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-bg flex items-center justify-center px-4 relative">
+    <div className="min-h-screen bg-bg flex flex-col relative">
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[500px] h-[300px] bg-gradient-to-b from-primary/8 to-transparent rounded-full blur-[80px] pointer-events-none" />
 
-      <div className="w-full max-w-sm relative z-10">
+      <div className="w-full flex-1 flex items-center justify-center px-4 py-12 relative z-10">
+        <div className="w-full max-w-sm">
         <Card className="relative overflow-hidden">
           <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-primary/10 to-transparent rounded-bl-full pointer-events-none" />
           <CardHeader className="relative">
@@ -149,6 +151,11 @@ export default function Login() {
             )}
           </CardContent>
         </Card>
+        </div>
+      </div>
+
+      <div className="relative z-10">
+        <ComplianceFooter />
       </div>
     </div>
   );

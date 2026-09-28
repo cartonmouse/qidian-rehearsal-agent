@@ -1,26 +1,13 @@
-import { lazy, Suspense, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
-import { TaskStatusProvider } from "./contexts/TaskStatusContext";
 import useAuth from "./hooks/useAuth";
 import Sidebar from "./components/Sidebar";
-import TaskNotification from "./components/TaskNotification";
+import ComplianceFooter from "./components/ComplianceFooter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Login from "./pages/Login";
-import Interview from "./pages/Interview";
-import Review from "./pages/Review";
-import History from "./pages/History";
-import Knowledge from "./pages/Knowledge";
-import TopicDetail from "./pages/TopicDetail";
-import Graph from "./pages/Graph";
-import RecordingAnalysis from "./pages/RecordingAnalysis";
-import Copilot from "./pages/Copilot";
-import TopicDrill from "./pages/TopicDrill";
-import MockInterview from "./pages/MockInterview";
-import Settings from "./pages/Settings";
 import Onboarding from "./pages/Onboarding";
 import NotFound from "./pages/NotFound";
-import PersonalAgent from "./pages/PersonalAgent";
 import RehearsalStudio from "./pages/RehearsalStudio";
 import ScriptRag from "./pages/ScriptRag";
 import ActorSchedule from "./pages/ActorSchedule";
@@ -35,10 +22,6 @@ import StageVisualization from "./pages/StageVisualization";
 import ResourceManagement from "./pages/ResourceManagement";
 import ResourceFinance from "./pages/ResourceFinance";
 import AgentRuns from "./pages/AgentRuns";
-
-// 简历模块体量大(编辑器 + 9 套模板),按需加载避免拖慢首屏
-const ResumeManager = lazy(() => import("./pages/ResumeManager"));
-const ResumeEditor = lazy(() => import("./pages/ResumeEditor"));
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
   const { token, loading } = useAuth();
@@ -79,6 +62,7 @@ function AppShell({ children }: { children: ReactNode }) {
       <Sidebar />
       <main className="flex-1 overflow-y-auto flex flex-col">
         {children}
+        <ComplianceFooter />
       </main>
     </div>
   );
@@ -96,12 +80,6 @@ function AppRoutes() {
             <ProviderGate>
             <AppShell>
               <Routes>
-                <Route path="/interview/:sessionId" element={<Interview />} />
-                <Route path="/review/:sessionId" element={<Review />} />
-                <Route path="/history" element={<History />} />
-                {/* The profile dashboard is not part of qidian. */}
-                <Route path="/profile" element={<Navigate to="/rehearsal" replace />} />
-                <Route path="/personal-agent" element={<PersonalAgent />} />
                 <Route path="/rehearsal" element={<RehearsalStudio />} />
                 <Route path="/rehearsal/rag" element={<ScriptRag />} />
                 <Route path="/rehearsal/schedule" element={<ActorSchedule />} />
@@ -116,38 +94,7 @@ function AppRoutes() {
                 <Route path="/rehearsal/resources" element={<ResourceManagement />} />
                 <Route path="/rehearsal/resource-finance" element={<ResourceFinance />} />
                 <Route path="/rehearsal/runs" element={<AgentRuns />} />
-                <Route path="/profile/topic/:topic" element={<TopicDetail />} />
-                <Route path="/knowledge" element={<Knowledge />} />
-                <Route path="/graph" element={<Graph />} />
-                <Route path="/recording" element={<RecordingAnalysis />} />
-                <Route path="/mock-interview" element={<MockInterview />} />
-                <Route
-                  path="/job-prep"
-                  element={<Navigate to="/mock-interview?mode=targeted" replace />}
-                />
-                <Route path="/copilot" element={<Copilot />} />
-                <Route path="/topic-drill" element={<TopicDrill />} />
-                <Route
-                  path="/resume-interview"
-                  element={<Navigate to="/mock-interview?mode=live" replace />}
-                />
-                <Route
-                  path="/resume-manager"
-                  element={
-                    <Suspense fallback={null}>
-                      <ResumeManager />
-                    </Suspense>
-                  }
-                />
-                <Route
-                  path="/resume-manager/:id"
-                  element={
-                    <Suspense fallback={null}>
-                      <ResumeEditor />
-                    </Suspense>
-                  }
-                />
-                <Route path="/settings" element={<Settings />} />
+                <Route path="/settings" element={<Onboarding />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </AppShell>
@@ -163,12 +110,9 @@ function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
-        <TaskStatusProvider>
-          <ErrorBoundary>
-            <AppRoutes />
-            <TaskNotification />
-          </ErrorBoundary>
-        </TaskStatusProvider>
+        <ErrorBoundary>
+          <AppRoutes />
+        </ErrorBoundary>
       </BrowserRouter>
     </AuthProvider>
   );

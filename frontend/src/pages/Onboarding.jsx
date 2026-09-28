@@ -6,7 +6,7 @@ import {
   updateSettings,
   testLLMConnection,
   testEmbeddingConnection,
-} from "../api/interview";
+} from "../api/settings";
 import { Loader2, Server, Boxes, ArrowRight, ArrowLeft, Eye, EyeOff, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 import Logo from "../components/Logo";
 
 // 首登引导：每个用户都得带自己的 key,这里两步把 LLM + Embedding 配齐。
-// 其余可选服务(语音/搜索/录音上传)留到设置页按需填。
+  // 其余可选服务留到设置页按需配置。
 export default function Onboarding() {
   const { setNeedsOnboarding, logout } = useAuth();
   const navigate = useNavigate();
@@ -38,7 +38,7 @@ export default function Onboarding() {
   const [embLocalModel, setEmbLocalModel] = useState("");
   const [embLocalPath, setEmbLocalPath] = useState("");
 
-  // 保留 training/services/system,保存时不被覆盖
+  // 保留其余账户配置，保存时不被覆盖
   const [base, setBase] = useState(null);
 
   useEffect(() => {
@@ -127,7 +127,7 @@ export default function Onboarding() {
         training: base?.training || { num_questions: 10, divergence: 3 },
       });
       setNeedsOnboarding(false);
-      navigate("/profile", { replace: true });
+      navigate("/rehearsal", { replace: true });
     } catch (e) {
       setError("保存失败：" + e.message);
       setSaving(false);
@@ -219,7 +219,7 @@ export default function Onboarding() {
             ) : (
               <div className="space-y-4">
                 <div className="text-[13px] text-dim">
-                  Embedding 用于知识库 / 个人资料库 / 记忆向量化；简历会直接读取全文。可以使用 API，也可以在本机加载 HuggingFace 模型。
+                  Embedding 用于剧本知识库和语义检索。可以使用 API，也可以在本机加载 HuggingFace 模型。
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {[
@@ -321,7 +321,7 @@ export default function Onboarding() {
         </Card>
 
         <div className="text-center text-[12px] text-dim/70 mt-4">
-          语音输入、联网搜索、录音复盘等可选功能的 key 可稍后在「设置 → 可选服务」里补。
+          其他可选服务的 key 可稍后在「设置」里补充。
         </div>
         <div className="text-center mt-3">
           <button

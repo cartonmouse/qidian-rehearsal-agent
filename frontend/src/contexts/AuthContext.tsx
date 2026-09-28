@@ -33,12 +33,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     const headers = { Authorization: `Bearer ${token}` };
     Promise.all([
-      fetch("/api/profile", { headers }),
+      fetch("/api/", { headers }),
       fetch("/api/settings", { headers }),
     ])
-      .then(async ([profileRes, settingsRes]) => {
+      .then(async ([serviceRes, settingsRes]) => {
         if (cancelled) return;
-        if (!profileRes.ok) {
+        if (!serviceRes.ok) {
           logout();
           return;
         }

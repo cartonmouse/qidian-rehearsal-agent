@@ -1,21 +1,9 @@
-// 带鉴权的 fetch 封装 + openapi 类型接线,供 api/ 各模块共用
-import type { paths } from "./schema";
+// 带鉴权的 fetch 封装，供奇点排练 API 模块共用
 
 export const API_BASE = "/api";
 
-type JsonBody<T> = T extends { content: { "application/json": infer J } }
-  ? J
-  : unknown;
-
-/**
- * 按路径/方法从生成的 openapi schema 提取 200 响应的 JSON 类型。
- * 后端目前未声明 response_model,一律解析为 unknown;
- * 后端补上后运行 `npm run gen:api` 重新生成 schema,这里会自动收窄,api 函数无需改动。
- */
-export type ApiResponse<
-  P extends keyof paths,
-  M extends keyof paths[P],
-> = paths[P][M] extends { responses: { 200: infer R } } ? JsonBody<R> : unknown;
+/** 保留一个轻量兼容类型，避免业务 API 与生成的旧 OpenAPI 文件耦合。 */
+export type ApiResponse<_Path extends string = string, _Method extends string = string> = unknown;
 
 function authHeaders(extra: HeadersInit = {}): Record<string, string> {
   const token = localStorage.getItem("token");
